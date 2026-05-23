@@ -43,7 +43,7 @@
 
 ### 📦 下载安装
 
-从 [Releases](https://github.com/ale-my-eyes/ale-my-eyes/releases) 页面下载适合您平台的安装包：
+从 [Releases](https://github.com/Risaly-Noroki-Dev-Club/ale-my-eyes/releases) 页面下载适合您平台的安装包：
 
 - **Windows**: `ale-my-eyes-windows.zip`
 - **Linux**: `ale-my-eyes-linux.tar.gz`
@@ -149,7 +149,7 @@ ale-my-eyes/
 
 #### 克隆仓库
 ```bash
-git clone https://github.com/ale-my-eyes/ale-my-eyes.git
+git clone https://github.com/Risaly-Noroki-Dev-Club/ale-my-eyes.git
 cd ale-my-eyes
 ```
 
@@ -262,6 +262,6 @@ println!("图像描述: {}", description);
 - [水素&lin] - 最初的动力
 ## 📞 联系我们
 
-- **项目主页**: [https://github.com/ale-my-eyes/ale-my-eyes](https://github.com/ale-my-eyes/ale-my-eyes)
-- **问题反馈**: [GitHub Issues](https://github.com/ale-my-eyes/ale-my-eyes/issues)
+- **项目主页**: [https://github.com/Risaly-Noroki-Dev-Club/ale-my-eyes](https://github.com/Risaly-Noroki-Dev-Club/ale-my-eyes)
+- **问题反馈**: [GitHub Issues](https://github.com/Risaly-Noroki-Dev-Club/ale-my-eyes/issues)
 - **邮箱**: erika@risnordev.org
