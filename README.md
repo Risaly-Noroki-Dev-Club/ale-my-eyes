@@ -247,29 +247,6 @@ println!("图像描述: {}", description);
 }
 ```
 
-## 🤝 贡献指南
-
-我们欢迎所有形式的贡献！
-
-### 🐛 报告问题
-- 使用 [GitHub Issues](https://github.com/ale-my-eyes/ale-my-eyes/issues) 报告 bug
-- 提供详细的复现步骤和环境信息
-
-### 💡 提出建议
-- 在 Issues 中提出新功能建议
-- 描述使用场景和预期效果
-
-### 🔧 提交代码
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
-
-### 📝 代码规范
-- 遵循 Rust 官方风格指南
-- 添加必要的注释和文档
-- 编写测试用例
 
 ## 📄 许可证
 
@@ -282,22 +259,9 @@ println!("图像描述: {}", description);
 - [OpenAI](https://openai.com/) - 云端API服务
 - [iced](https://github.com/iced-rs/iced) - 跨平台GUI框架
 - [Axum](https://github.com/tokio-rs/axum) - Web框架
-
+- [水素&lin] - 最初的动力
 ## 📞 联系我们
 
 - **项目主页**: [https://github.com/ale-my-eyes/ale-my-eyes](https://github.com/ale-my-eyes/ale-my-eyes)
 - **问题反馈**: [GitHub Issues](https://github.com/ale-my-eyes/ale-my-eyes/issues)
 - **邮箱**: erika@risnordev.org
-
-## 🎉 更新日志
-
-### v1.0.0 (2024-01-20)
-- ✨ 初始版本发布
-- 🎤 支持语音识别和合成
-- 👁️ 支持图像描述
-- 🔧 支持配置管理
-- 📦 支持 Windows/Linux/Android 平台
-
----
-
-**Ale, My Eyes!** - 让科技更有温度，让世界更无障碍 ❤️
