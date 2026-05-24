@@ -135,4 +135,18 @@ Required cloud settings:
 }
 ```
 
+Any OpenAI-compatible API server is supported by changing `api_url`. For example:
+
+```json
+{
+  "cloud_api": {
+    "api_key": "your-key",
+    "api_url": "https://your-server.example.com/v1",
+    "model": "your-model"
+  }
+}
+```
+
+This works with self-hosted proxies, OpenRouter, Azure OpenAI (with compatible endpoint), and other OpenAI-compatible providers.
+
 Do not commit real API keys.

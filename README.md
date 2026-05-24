@@ -216,7 +216,8 @@ cargo run -p ale-gui
 
 GUI 支持：
 
-- 在设置页保存 OpenAI 兼容 API Key、API URL、模型名、语言和字体大小。
+- 在设置页保存 API Key、API URL、模型名、语言和字体大小。
+- 支持任何 OpenAI 兼容 API（如 OpenRouter、自建代理、Azure OpenAI 等），只需修改 API URL。
 - 测试云端连接。
 - 选择图片并调用 VLM 描述。
 - 录音最多 60 秒，停止后转为 WAV 并调用 ASR 转写。
