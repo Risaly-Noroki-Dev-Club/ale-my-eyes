@@ -13,7 +13,7 @@ tts = { version = "0.25", optional = true }
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic"], optional = true }
 ndarray = { version = "0.15", optional = true }
 image = "0.25"
-whisper-rs = { version = "0.10", optional = true }
+whisper-rs = { version = "0.16", optional = true }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

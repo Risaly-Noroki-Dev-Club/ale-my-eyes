@@ -48,7 +48,7 @@ impl SystemTts {
                 .map_err(|e| AleError::TtsError(format!("Failed to get voices: {}", e)))?;
 
             for voice in voices {
-                if voice.name() == voice_name {
+                if voice.name() == *voice_name {
                     tts.set_voice(&voice)
                         .map_err(|e| AleError::TtsError(format!("Failed to set voice: {}", e)))?;
                     break;

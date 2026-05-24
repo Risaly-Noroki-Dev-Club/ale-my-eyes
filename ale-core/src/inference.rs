@@ -3,6 +3,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "local-inference")]
+use crate::asr::SpeechRecognizer;
+
 /// 设备性能等级
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum DevicePerformance {
@@ -84,6 +87,8 @@ pub struct InferenceResult<T> {
 pub struct AdaptiveInference {
     config: InferenceConfig,
     cloud_api: Option<Box<dyn crate::cloud::CloudApi>>,
+    #[cfg(feature = "local-inference")]
+    local_asr: Option<crate::asr::WhisperRecognizer>,
 }
 
 impl AdaptiveInference {
@@ -91,12 +96,20 @@ impl AdaptiveInference {
         Self {
             config,
             cloud_api: None,
+            #[cfg(feature = "local-inference")]
+            local_asr: None,
         }
     }
 
     /// 设置云端API
     pub fn set_cloud_api(&mut self, api: Box<dyn crate::cloud::CloudApi>) {
         self.cloud_api = Some(api);
+    }
+
+    /// 设置本地 ASR 模型
+    #[cfg(feature = "local-inference")]
+    pub fn set_local_asr(&mut self, recognizer: crate::asr::WhisperRecognizer) {
+        self.local_asr = Some(recognizer);
     }
 
     /// 检测设备性能
@@ -171,10 +184,20 @@ impl AdaptiveInference {
 
         let result = match mode {
             InferenceMode::LocalOnly => {
-                // 本地推理（需要本地模型）
-                return Err(AleError::Other(anyhow::anyhow!(
-                    "Local inference not available"
-                )));
+                #[cfg(feature = "local-inference")]
+                {
+                    let asr = self
+                        .local_asr
+                        .as_ref()
+                        .ok_or_else(|| AleError::NotInitialized("Local ASR model"))?;
+                    asr.transcribe(audio_data).await?
+                }
+                #[cfg(not(feature = "local-inference"))]
+                {
+                    return Err(AleError::Other(anyhow::anyhow!(
+                        "Local inference not available (feature not enabled)"
+                    )));
+                }
             }
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
                 // 云端推理

@@ -78,6 +78,45 @@ impl AleEngine {
             cloud_ready = true;
         }
 
+        // Try to load local ASR model if local-inference feature is enabled
+        #[cfg(feature = "local-inference")]
+        {
+            let whisper_model_id = match config_manager.config().inference.mode.as_str() {
+                "local" | "adaptive" => {
+                    // Pick model based on device performance
+                    match model_manager.device_performance() {
+                        inference::DevicePerformance::Low => "whisper-tiny",
+                        inference::DevicePerformance::Medium => "whisper-small",
+                        inference::DevicePerformance::High => "whisper-large-v3",
+                    }
+                }
+                _ => "whisper-tiny",
+            };
+
+            if let Some(model_path) = model_manager.get_model_path(whisper_model_id) {
+                match asr::WhisperRecognizer::new(&model_path).await {
+                    Ok(mut recognizer) => {
+                        let lang = Some(config_manager.config().ui.language.clone());
+                        recognizer = recognizer.with_language(lang);
+                        if let Err(e) = recognizer.load_model() {
+                            tracing::warn!("Failed to load whisper model weights: {}", e);
+                        } else {
+                            inference_engine.set_local_asr(recognizer);
+                            tracing::info!("Local ASR model loaded: {}", whisper_model_id);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to create WhisperRecognizer: {}", e);
+                    }
+                }
+            } else {
+                tracing::info!(
+                    "No local whisper model found ({}). Local ASR disabled.",
+                    whisper_model_id
+                );
+            }
+        }
+
         Ok(Self {
             config_manager,
             model_manager: Arc::new(Mutex::new(model_manager)),
@@ -114,6 +153,23 @@ impl AleEngine {
         self.inference_engine.set_cloud_api(api);
         self.cloud_api = true;
 
+        Ok(())
+    }
+
+    /// 加载本地 ASR 模型（下载后调用）
+    #[cfg(feature = "local-inference")]
+    pub async fn load_local_asr(&mut self, model_id: &str) -> Result<()> {
+        let manager = self.model_manager.lock().await;
+        let model_path = manager.get_model_path(model_id).ok_or_else(|| {
+            AleError::ConfigError(format!("Model '{}' not found or not downloaded", model_id))
+        })?;
+        drop(manager);
+
+        let mut recognizer = asr::WhisperRecognizer::new(&model_path).await?;
+        let lang = Some(self.config_manager.config().ui.language.clone());
+        recognizer = recognizer.with_language(lang);
+        recognizer.load_model()?;
+        self.inference_engine.set_local_asr(recognizer);
         Ok(())
     }
 

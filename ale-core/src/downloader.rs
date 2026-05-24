@@ -68,7 +68,7 @@ impl ModelDownloader {
                 name: "Whisper Tiny".to_string(),
                 description: "轻量级语音识别模型".to_string(),
                 size: 75 * 1024 * 1024, // 75MB
-                repo: "ggerganov/whisper.cpp".to_string(),
+                repo: "ggml-org/whisper.cpp".to_string(),
                 filename: "ggml-tiny.bin".to_string(),
                 quantization: Some("q4_0".to_string()),
                 purpose: "基础语音识别".to_string(),
@@ -79,7 +79,7 @@ impl ModelDownloader {
                 name: "Whisper Small".to_string(),
                 description: "中等质量语音识别模型".to_string(),
                 size: 244 * 1024 * 1024, // 244MB
-                repo: "ggerganov/whisper.cpp".to_string(),
+                repo: "ggml-org/whisper.cpp".to_string(),
                 filename: "ggml-small.bin".to_string(),
                 quantization: Some("q4_0".to_string()),
                 purpose: "高质量语音识别".to_string(),
@@ -90,7 +90,7 @@ impl ModelDownloader {
                 name: "Whisper Large V3".to_string(),
                 description: "最高质量语音识别模型".to_string(),
                 size: 1500 * 1024 * 1024, // 1.5GB
-                repo: "ggerganov/whisper.cpp".to_string(),
+                repo: "ggml-org/whisper.cpp".to_string(),
                 filename: "ggml-large-v3.bin".to_string(),
                 quantization: Some("q4_0".to_string()),
                 purpose: "专业级语音识别".to_string(),
