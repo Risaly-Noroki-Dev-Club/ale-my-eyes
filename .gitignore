@@ -14,6 +14,8 @@ Cargo.lock
 Thumbs.db
 
 # Build artifacts
+/release/
+/dist/
 *.exe
 *.dll
 *.so

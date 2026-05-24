@@ -12,6 +12,11 @@ on:
       - master
       - main
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag for manual publishing; defaults to manual-<run number> when empty'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -36,7 +41,7 @@ jobs:
         run: cargo check --workspace
 
   build-windows:
-    name: Build Windows package
+    name: Build Windows executable
     needs: check
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
@@ -50,18 +55,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: ./scripts/package-windows.sh
+        run: |
+          cargo build --release -p ale-gui
+          cp target/release/ale-gui.exe ale-my-eyes-windows.exe
 
-      - name: Upload Windows package
+      - name: Upload Windows executable
         uses: actions/upload-artifact@v4
         with:
           name: ale-my-eyes-windows
-          path: |
-            ale-my-eyes-windows/
-            ale-my-eyes-windows.zip
+          path: ale-my-eyes-windows.exe
 
   build-linux:
-    name: Build Linux package
+    name: Build Ubuntu deb
     needs: check
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -75,15 +80,31 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libspeechd-dev libasound2-dev
 
       - name: Build
-        run: ./scripts/package-linux.sh
+        run: cargo build --release -p ale-server -p ale-cli -p ale-gui
 
-      - name: Upload Linux package
+      - name: Create deb package
+        run: |
+          PACKAGE_ROOT="dist/deb/ale-my-eyes"
+          mkdir -p "${PACKAGE_ROOT}/DEBIAN" "${PACKAGE_ROOT}/usr/bin"
+          cp target/release/ale-server "${PACKAGE_ROOT}/usr/bin/"
+          cp target/release/ale-cli "${PACKAGE_ROOT}/usr/bin/"
+          cp target/release/ale-gui "${PACKAGE_ROOT}/usr/bin/"
+          cat > "${PACKAGE_ROOT}/DEBIAN/control" <<'EOF'
+          Package: ale-my-eyes
+          Version: 0.1.0
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Risaly Noroki Dev Club <erika@risnordev.org>
+          Description: Intelligent accessibility assistant
+          EOF
+          dpkg-deb --build "${PACKAGE_ROOT}" ale-my-eyes_0.1.0_amd64.deb
+
+      - name: Upload Ubuntu deb
         uses: actions/upload-artifact@v4
         with:
           name: ale-my-eyes-linux
-          path: |
-            ale-my-eyes-linux/
-            ale-my-eyes-linux.tar.gz
+          path: ale-my-eyes_0.1.0_amd64.deb
 
   build-android:
     name: Build Android package
@@ -99,23 +120,29 @@ jobs:
       - name: Install Android NDK
         run: ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653"
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
       - name: Build
         env:
           ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
-        run: ./scripts/package-android.sh
+        run: |
+          ./scripts/package-android.sh
+          gradle -p ale-my-eyes-android assembleDebug
+          cp ale-my-eyes-android/app/build/outputs/apk/debug/app-debug.apk ale-my-eyes-android.apk
 
-      - name: Upload Android package
+      - name: Upload Android apk
         uses: actions/upload-artifact@v4
         with:
           name: ale-my-eyes-android
-          path: |
-            ale-my-eyes-android/
-            ale-my-eyes-android.zip
+          path: ale-my-eyes-android.apk
 
   release:
     name: Publish GitHub release
     needs: [build-windows, build-linux, build-android]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,9 +155,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.release_tag || format('manual-{0}', github.run_number)) || github.ref_name }}
+          name: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.release_tag || format('manual-{0}', github.run_number)) || github.ref_name }}
           files: |
-            artifacts/ale-my-eyes-windows/ale-my-eyes-windows.zip
-            artifacts/ale-my-eyes-linux/ale-my-eyes-linux.tar.gz
-            artifacts/ale-my-eyes-android/ale-my-eyes-android.zip
+            artifacts/ale-my-eyes-windows/ale-my-eyes-windows.exe
+            artifacts/ale-my-eyes-linux/ale-my-eyes_0.1.0_amd64.deb
+            artifacts/ale-my-eyes-android/ale-my-eyes-android.apk
           draft: false
           prerelease: false

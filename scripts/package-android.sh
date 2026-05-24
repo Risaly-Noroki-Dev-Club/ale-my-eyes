@@ -50,11 +50,11 @@ echo -e "${YELLOW}构建 Android 版本...${NC}"
 
 # 构建 arm64 版本
 echo -e "${YELLOW}构建 arm64 版本...${NC}"
-cargo ndk -t arm64-v8a -p ale-core build --release
+cargo ndk -t arm64-v8a build -p ale-core --release
 
 # 构建 armv7 版本
 echo -e "${YELLOW}构建 armv7 版本...${NC}"
-cargo ndk -t armeabi-v7a -p ale-core build --release
+cargo ndk -t armeabi-v7a build -p ale-core --release
 
 # 创建打包目录
 PACKAGE_DIR="ale-my-eyes-android"
@@ -92,9 +92,7 @@ cat > "${PACKAGE_DIR}/app/src/main/AndroidManifest.xml" << EOF
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         
@@ -116,6 +114,43 @@ cat > "${PACKAGE_DIR}/app/src/main/AndroidManifest.xml" << EOF
 </manifest>
 EOF
 
+# 创建最小可运行 Activity 和 Service
+echo -e "${YELLOW}创建 Android Activity...${NC}"
+cat > "${PACKAGE_DIR}/app/src/main/java/com/alemyeyes/MainActivity.kt" << EOF
+package com.alemyeyes
+
+import android.app.Activity
+import android.os.Bundle
+import android.view.Gravity
+import android.widget.TextView
+
+class MainActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val textView = TextView(this).apply {
+            text = "Ale, My Eyes!"
+            textSize = 24f
+            gravity = Gravity.CENTER
+        }
+
+        setContentView(textView)
+    }
+}
+EOF
+
+cat > "${PACKAGE_DIR}/app/src/main/java/com/alemyeyes/AleService.kt" << EOF
+package com.alemyeyes
+
+import android.app.Service
+import android.content.Intent
+import android.os.IBinder
+
+class AleService : Service() {
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+EOF
+
 # 创建 strings.xml
 echo -e "${YELLOW}创建 strings.xml...${NC}"
 cat > "${PACKAGE_DIR}/app/src/main/res/values/strings.xml" << EOF
@@ -129,6 +164,15 @@ cat > "${PACKAGE_DIR}/app/src/main/res/values/strings.xml" << EOF
     <string name="api_key">API 密钥</string>
     <string name="save">保存</string>
     <string name="cancel">取消</string>
+</resources>
+EOF
+
+# 创建主题资源
+echo -e "${YELLOW}创建 styles.xml...${NC}"
+cat > "${PACKAGE_DIR}/app/src/main/res/values/styles.xml" << EOF
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar" />
 </resources>
 EOF
 
