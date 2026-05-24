@@ -452,17 +452,10 @@ EOF
 
 # 创建项目级 build.gradle
 echo -e "${YELLOW}创建项目级 build.gradle...${NC}"
-cat > "${PACKAGE_DIR}/build.gradle" << EOF
-buildscript {
-    ext.kotlin_version = '1.9.22'
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.2'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:\$kotlin_version"
-    }
+cat > "${PACKAGE_DIR}/build.gradle" << 'EOF'
+plugins {
+    id 'com.android.application' version '8.2.2' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
 }
 
 task clean(type: Delete) {
