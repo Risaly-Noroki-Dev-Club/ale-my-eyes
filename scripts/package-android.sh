@@ -119,22 +119,246 @@ echo -e "${YELLOW}创建 Android Activity...${NC}"
 cat > "${PACKAGE_DIR}/app/src/main/java/com/alemyeyes/MainActivity.kt" << EOF
 package com.alemyeyes
 
-import android.app.Activity
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
 import android.os.Bundle
-import android.view.Gravity
+import android.speech.tts.TextToSpeech
+import android.util.Base64
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+    private lateinit var apiKeyInput: EditText
+    private lateinit var resultView: TextView
+    private var recorder: MediaRecorder? = null
+    private var recordingFile: File? = null
+    private var tts: TextToSpeech? = null
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            describeImage(uri)
+        } else {
+            setResultText("未选择图片")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        tts = TextToSpeech(this, this)
 
-        val textView = TextView(this).apply {
-            text = "Ale, My Eyes!"
-            textSize = 24f
-            gravity = Gravity.CENTER
+        val prefs = getSharedPreferences("ale-my-eyes", MODE_PRIVATE)
+
+        apiKeyInput = EditText(this).apply {
+            hint = "OpenAI API Key"
+            setText(prefs.getString("api_key", ""))
         }
 
-        setContentView(textView)
+        resultView = TextView(this).apply {
+            text = "就绪"
+            textSize = 18f
+            setPadding(0, 16, 0, 16)
+        }
+
+        val saveButton = Button(this).apply {
+            text = "保存 API Key"
+            setOnClickListener {
+                prefs.edit().putString("api_key", apiKeyInput.text.toString()).apply()
+                setResultText("API Key 已保存")
+            }
+        }
+
+        val describeButton = Button(this).apply {
+            text = "选择图片并描述"
+            setOnClickListener { imagePicker.launch("image/*") }
+        }
+
+        val recordButton = Button(this).apply {
+            text = "开始录音"
+            setOnClickListener {
+                if (recorder == null) {
+                    startRecording(this)
+                } else {
+                    stopRecording(this)
+                }
+            }
+        }
+
+        val speakButton = Button(this).apply {
+            text = "朗读结果"
+            setOnClickListener { speak(resultView.text.toString()) }
+        }
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 32, 32, 32)
+            addView(TextView(this@MainActivity).apply {
+                text = "Ale, My Eyes!"
+                textSize = 26f
+            })
+            addView(apiKeyInput)
+            addView(saveButton)
+            addView(describeButton)
+            addView(recordButton)
+            addView(speakButton)
+            addView(resultView)
+        }
+
+        setContentView(ScrollView(this).apply { addView(layout) })
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.CHINESE
+        }
+    }
+
+    private fun apiKey(): String = apiKeyInput.text.toString().trim()
+
+    private fun setResultText(text: String) {
+        runOnUiThread { resultView.text = text }
+    }
+
+    private fun describeImage(uri: android.net.Uri) {
+        val key = apiKey()
+        if (key.isEmpty()) {
+            setResultText("请先保存 API Key")
+            return
+        }
+
+        setResultText("正在描述图片...")
+        Thread {
+            try {
+                val imageBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("无法读取图片")
+                val imageBase64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+                val body = JSONObject()
+                    .put("model", "gpt-4o")
+                    .put("max_tokens", 1024)
+                    .put("messages", JSONArray().put(JSONObject()
+                        .put("role", "user")
+                        .put("content", JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", "请描述这张图片的内容"))
+                            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64," + imageBase64))))))
+                val response = postJson("https://api.openai.com/v1/chat/completions", key, body)
+                val text = JSONObject(response)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+                setResultText(text)
+            } catch (error: Exception) {
+                setResultText("图片描述失败: " + error.message)
+            }
+        }.start()
+    }
+
+    private fun startRecording(button: Button) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            return
+        }
+
+        recordingFile = File(cacheDir, "recording.m4a")
+        recorder = MediaRecorder().apply {
+            setAudioSource(MediaRecorder.AudioSource.MIC)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(recordingFile!!.absolutePath)
+            prepare()
+            start()
+        }
+        button.text = "停止录音并转写"
+        setResultText("正在录音...")
+    }
+
+    private fun stopRecording(button: Button) {
+        val key = apiKey()
+        if (key.isEmpty()) {
+            setResultText("请先保存 API Key")
+            return
+        }
+
+        recorder?.run {
+            stop()
+            release()
+        }
+        recorder = null
+        button.text = "开始录音"
+        setResultText("正在转写录音...")
+
+        val file = recordingFile ?: return setResultText("录音文件不存在")
+        Thread {
+            try {
+                val response = postMultipartAudio("https://api.openai.com/v1/audio/transcriptions", key, file)
+                val text = JSONObject(response).getString("text")
+                setResultText(text)
+            } catch (error: Exception) {
+                setResultText("语音识别失败: " + error.message)
+            }
+        }.start()
+    }
+
+    private fun speak(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "result")
+    }
+
+    private fun postJson(url: String, key: String, body: JSONObject): String {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Authorization", "Bearer " + key)
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.doOutput = true
+        OutputStreamWriter(connection.outputStream).use { it.write(body.toString()) }
+        return readResponse(connection)
+    }
+
+    private fun postMultipartAudio(url: String, key: String, file: File): String {
+        val boundary = "AleMyEyesBoundary" + System.currentTimeMillis()
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Authorization", "Bearer " + key)
+        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
+        connection.doOutput = true
+
+        connection.outputStream.use { output ->
+            output.write("--".toByteArray())
+            output.write(boundary.toByteArray())
+            output.write("\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n".toByteArray())
+            output.write("--".toByteArray())
+            output.write(boundary.toByteArray())
+            output.write("\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.m4a\"\r\n".toByteArray())
+            output.write("Content-Type: audio/mp4\r\n\r\n".toByteArray())
+            output.write(file.readBytes())
+            output.write("\r\n--".toByteArray())
+            output.write(boundary.toByteArray())
+            output.write("--\r\n".toByteArray())
+        }
+
+        return readResponse(connection)
+    }
+
+    private fun readResponse(connection: HttpURLConnection): String {
+        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+        val response = stream.bufferedReader().use { it.readText() }
+        if (connection.responseCode !in 200..299) {
+            throw IllegalStateException(response)
+        }
+        return response
     }
 }
 EOF
@@ -218,6 +442,7 @@ android {
 }
 
 dependencies {
+    implementation 'androidx.activity:activity-ktx:1.8.2'
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'

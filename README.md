@@ -190,6 +190,80 @@ cargo fmt
 cargo clippy
 ```
 
+### ✅ 常用验证命令
+```bash
+cargo fmt --all -- --check
+cargo check --workspace
+cargo clippy --workspace --all-targets
+cargo test --workspace
+```
+
+### 🚢 云端发布产物
+
+GitHub Actions 是发布产物的来源。推送 `v*` 标签或手动运行 `Build and Release` workflow 会构建并发布三种文件到 GitHub Release：
+
+- Ubuntu: `ale-my-eyes_0.1.0_amd64.deb`
+- Windows: `ale-my-eyes-windows.exe`
+- Android: `ale-my-eyes-android.apk`
+
+普通 push / pull request 只运行格式化和 workspace 检查，不创建 Release。
+
+### 🖥️ 桌面 GUI
+
+```bash
+cargo run -p ale-gui
+```
+
+GUI 支持：
+
+- 在设置页保存 OpenAI 兼容 API Key、API URL、模型名、语言和字体大小。
+- 测试云端连接。
+- 选择图片并调用 VLM 描述。
+- 录音最多 60 秒，停止后转为 WAV 并调用 ASR 转写。
+- 朗读当前结果。
+
+Linux 构建/运行 GUI 录音功能需要系统依赖：
+
+```bash
+sudo apt-get install libasound2-dev
+```
+
+### 🧰 CLI 用法
+
+```bash
+# 语音识别，输出到终端
+cargo run -p ale-cli -- transcribe --audio input.wav
+
+# 语音识别，写入文本文件
+cargo run -p ale-cli -- transcribe --audio input.wav --output transcript.txt
+
+# 语音合成，写出 WAV 音频
+cargo run -p ale-cli -- synthesize --text "你好" --output speech.wav
+
+# 图片描述，输出到终端
+cargo run -p ale-cli -- describe --image screenshot.png
+
+# 查看引擎状态
+cargo run -p ale-cli -- status
+```
+
+CLI 使用与 GUI 相同的用户配置文件。请先通过 GUI 设置页保存 API Key，或手动编辑用户配置目录下的 `ale-my-eyes/config.json`。
+
+### 🌐 HTTP Server
+
+```bash
+cargo run -p ale-server
+```
+
+默认监听 `0.0.0.0:8000`，提供：
+
+- `GET /health`
+- `POST /asr/transcribe`
+- `POST /tts/synthesize`
+- `POST /vlm/describe`
+
+接口详情见 [`docs/API.md`](docs/API.md)。
+
 ## 📚 使用教程
 
 ### 🎤 基础语音交互
