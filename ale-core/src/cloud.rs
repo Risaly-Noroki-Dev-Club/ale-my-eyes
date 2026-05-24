@@ -263,6 +263,7 @@ impl CloudApi for OpenAIApi {
             "model": "tts-1",
             "input": text,
             "voice": "alloy",
+            "response_format": "wav",
         });
 
         let response = self

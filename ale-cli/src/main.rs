@@ -1,3 +1,4 @@
+use ale_core::AleEngineFactory;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -32,7 +33,7 @@ enum Commands {
         #[arg(short, long)]
         output: PathBuf,
 
-        /// 语音
+        /// 语音，目前云端默认使用 alloy
         #[arg(long)]
         voice: Option<String>,
     },
@@ -59,27 +60,48 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Transcribe { audio, output: _ } => {
-            println!("Transcribing audio: {}", audio.display());
-            // TODO: 实现转录功能
+        Commands::Transcribe { audio, output } => {
+            let engine = AleEngineFactory::create_default().await?;
+            let audio_data = tokio::fs::read(&audio).await?;
+            let text = engine.transcribe(&audio_data).await?;
+            write_or_print(output, &text).await?;
         }
         Commands::Synthesize {
             text,
-            output: _,
+            output,
             voice: _,
         } => {
-            println!("Synthesizing text: {}", text);
-            // TODO: 实现合成功能
+            let engine = AleEngineFactory::create_default().await?;
+            let audio = engine.synthesize(&text).await?;
+            tokio::fs::write(&output, audio).await?;
+            println!("Audio written to {}", output.display());
         }
-        Commands::Describe { image, output: _ } => {
-            println!("Describing image: {}", image.display());
-            // TODO: 实现描述功能
+        Commands::Describe { image, output } => {
+            let engine = AleEngineFactory::create_default().await?;
+            let image_data = tokio::fs::read(&image).await?;
+            let description = engine.describe_image(&image_data).await?;
+            write_or_print(output, &description).await?;
         }
         Commands::Status => {
+            let engine = AleEngineFactory::create_default().await?;
+            let status = engine.status().await;
             println!("Ale, My Eyes! CLI");
             println!("Version: 0.1.0");
-            // TODO: 显示引擎状态
+            println!("Cloud ready: {}", status.cloud_ready);
+            println!("TTS ready: {}", status.tts_ready);
+            println!("Config language: {}", engine.config().ui.language);
         }
+    }
+
+    Ok(())
+}
+
+async fn write_or_print(output: Option<PathBuf>, text: &str) -> anyhow::Result<()> {
+    if let Some(output) = output {
+        tokio::fs::write(&output, text).await?;
+        println!("Text written to {}", output.display());
+    } else {
+        println!("{text}");
     }
 
     Ok(())

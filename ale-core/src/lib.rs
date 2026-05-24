@@ -31,7 +31,7 @@ pub struct AleEngine {
     config_manager: config::ConfigManager,
     model_manager: Arc<Mutex<manager::SmartModelManager>>,
     inference_engine: inference::AdaptiveInference,
-    cloud_api: Option<Box<dyn cloud::CloudApi>>,
+    cloud_api: bool,
     #[cfg(feature = "tts")]
     tts: Option<Box<dyn tts::TextToSpeech>>,
 }
@@ -69,22 +69,50 @@ impl AleEngine {
             ),
         };
 
-        let inference_engine = inference::AdaptiveInference::new(inference_config);
+        let mut inference_engine = inference::AdaptiveInference::new(inference_config);
+        let mut cloud_ready = false;
+
+        if !config_manager.config().cloud_api.api_key.trim().is_empty() {
+            let cloud_config = Self::cloud_config_from_app(&config_manager.config().cloud_api);
+            inference_engine.set_cloud_api(cloud::CloudApiFactory::create(cloud_config));
+            cloud_ready = true;
+        }
 
         Ok(Self {
             config_manager,
             model_manager: Arc::new(Mutex::new(model_manager)),
             inference_engine,
-            cloud_api: None,
+            cloud_api: cloud_ready,
             #[cfg(feature = "tts")]
             tts: None,
         })
+    }
+
+    fn cloud_config_from_app(config: &config::CloudApiConfig) -> cloud::CloudConfig {
+        let provider = match config.provider.to_lowercase().as_str() {
+            "anthropic" => cloud::CloudProvider::Anthropic,
+            "google" => cloud::CloudProvider::Google,
+            "azure" => cloud::CloudProvider::Azure,
+            "openai" => cloud::CloudProvider::OpenAI,
+            other => cloud::CloudProvider::Custom(other.to_string()),
+        };
+
+        cloud::CloudConfig {
+            provider,
+            api_key: config.api_key.clone(),
+            api_url: config.api_url.clone(),
+            model: config.model.clone(),
+            max_tokens: config.max_tokens,
+            timeout: std::time::Duration::from_secs(config.timeout as u64),
+            retry_count: 3,
+        }
     }
 
     /// 设置云端API
     pub async fn set_cloud_api(&mut self, api: Box<dyn cloud::CloudApi>) -> Result<()> {
         // 更新推理引擎
         self.inference_engine.set_cloud_api(api);
+        self.cloud_api = true;
 
         Ok(())
     }
@@ -111,10 +139,38 @@ impl AleEngine {
             return tts.synthesize(text).await;
         }
 
-        // 使用推理引擎
-        self.inference_engine.generate(text).await?;
-        // 这里需要将文本转换为音频，简化处理
-        Err(AleError::Other(anyhow::anyhow!("TTS not available")))
+        if self
+            .config_manager
+            .config()
+            .cloud_api
+            .api_key
+            .trim()
+            .is_empty()
+        {
+            return Err(AleError::ConfigError("API key is required".to_string()));
+        }
+
+        let cloud_config = Self::cloud_config_from_app(&self.config_manager.config().cloud_api);
+        let cloud_api = cloud::CloudApiFactory::create(cloud_config);
+        cloud_api.synthesize(text).await
+    }
+
+    /// 检查云端 API 是否可用。
+    pub async fn test_cloud_api(&self) -> Result<bool> {
+        if self
+            .config_manager
+            .config()
+            .cloud_api
+            .api_key
+            .trim()
+            .is_empty()
+        {
+            return Err(AleError::ConfigError("API key is required".to_string()));
+        }
+
+        let cloud_config = Self::cloud_config_from_app(&self.config_manager.config().cloud_api);
+        let cloud_api = cloud::CloudApiFactory::create(cloud_config);
+        cloud_api.health_check().await
     }
 
     /// 图像描述（通过推理引擎）
@@ -148,7 +204,7 @@ impl AleEngine {
 
     /// 检查引擎状态
     pub async fn status(&self) -> EngineStatus {
-        let cloud_ready = self.cloud_api.is_some();
+        let cloud_ready = self.cloud_api;
 
         #[cfg(feature = "tts")]
         let tts_ready = self.tts.is_some();
@@ -217,7 +273,7 @@ impl Default for AleEngine {
             config_manager,
             model_manager: Arc::new(Mutex::new(model_manager)),
             inference_engine,
-            cloud_api: None,
+            cloud_api: false,
             #[cfg(feature = "tts")]
             tts: None,
         }
