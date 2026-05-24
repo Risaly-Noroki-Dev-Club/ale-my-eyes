@@ -144,6 +144,8 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var apiKeyInput: EditText
+    private lateinit var apiUrlInput: EditText
+    private lateinit var modelInput: EditText
     private lateinit var resultView: TextView
     private var recorder: MediaRecorder? = null
     private var recordingFile: File? = null
@@ -164,8 +166,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val prefs = getSharedPreferences("ale-my-eyes", MODE_PRIVATE)
 
         apiKeyInput = EditText(this).apply {
-            hint = "OpenAI API Key"
+            hint = "API Key"
             setText(prefs.getString("api_key", ""))
+        }
+
+        apiUrlInput = EditText(this).apply {
+            hint = "API URL"
+            setText(prefs.getString("api_url", "https://api.openai.com/v1"))
+        }
+
+        modelInput = EditText(this).apply {
+            hint = "Model"
+            setText(prefs.getString("model", "gpt-4o"))
         }
 
         resultView = TextView(this).apply {
@@ -175,10 +187,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
 
         val saveButton = Button(this).apply {
-            text = "保存 API Key"
+            text = "保存设置"
             setOnClickListener {
-                prefs.edit().putString("api_key", apiKeyInput.text.toString()).apply()
-                setResultText("API Key 已保存")
+                prefs.edit()
+                    .putString("api_key", apiKeyInput.text.toString())
+                    .putString("api_url", apiUrlInput.text.toString())
+                    .putString("model", modelInput.text.toString())
+                    .apply()
+                setResultText("设置已保存")
             }
         }
 
@@ -211,6 +227,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 textSize = 26f
             })
             addView(apiKeyInput)
+            addView(apiUrlInput)
+            addView(modelInput)
             addView(saveButton)
             addView(describeButton)
             addView(recordButton)
@@ -228,6 +246,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun apiKey(): String = apiKeyInput.text.toString().trim()
+    private fun apiUrl(): String = apiUrlInput.text.toString().trim().trimEnd('/')
+    private fun model(): String = modelInput.text.toString().trim()
 
     private fun setResultText(text: String) {
         runOnUiThread { resultView.text = text }
@@ -247,14 +267,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     ?: throw IllegalStateException("无法读取图片")
                 val imageBase64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
                 val body = JSONObject()
-                    .put("model", "gpt-4o")
+                    .put("model", model())
                     .put("max_tokens", 1024)
                     .put("messages", JSONArray().put(JSONObject()
                         .put("role", "user")
                         .put("content", JSONArray()
                             .put(JSONObject().put("type", "text").put("text", "请描述这张图片的内容"))
                             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64," + imageBase64))))))
-                val response = postJson("https://api.openai.com/v1/chat/completions", key, body)
+                val response = postJson(apiUrl() + "/chat/completions", key, body)
                 val text = JSONObject(response)
                     .getJSONArray("choices")
                     .getJSONObject(0)
@@ -304,7 +324,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val file = recordingFile ?: return setResultText("录音文件不存在")
         Thread {
             try {
-                val response = postMultipartAudio("https://api.openai.com/v1/audio/transcriptions", key, file)
+                val response = postMultipartAudio(apiUrl() + "/audio/transcriptions", key, file)
                 val text = JSONObject(response).getString("text")
                 setResultText(text)
             } catch (error: Exception) {
