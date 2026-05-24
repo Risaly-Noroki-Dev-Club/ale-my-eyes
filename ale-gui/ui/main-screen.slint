@@ -1,0 +1,189 @@
+import { ScrollView } from "std-widgets.slint";
+import { Card, ActionButton, StatusBadge, SectionTitle, Theme } from "widgets.slint";
+
+export component MainScreen inherits ScrollView {
+    in property <string> status-text: "正在初始化...";
+    in property <string> status-type: "info";
+    in property <bool> is-recording: false;
+    in property <bool> is-busy: false;
+    in property <bool> engine-ready: false;
+    in property <int> recording-seconds: 0;
+    in property <string> result-title: "";
+    in property <string> result-text: "";
+    in property <string> result-metadata: "";
+    in property <bool> has-result: false;
+    in property <string> last-image-info: "";
+    in property <bool> auto-speak: true;
+
+    callback toggle-recording();
+    callback describe-image();
+    callback speak-result();
+    callback clear-result();
+    callback clear-error();
+    callback show-settings();
+    callback show-diagnostics();
+
+    mouse-drag-pan-enabled: true;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        VerticalLayout {
+            spacing: 8px;
+            alignment: center;
+
+            Text {
+                text: "👁️ Ale, My Eyes!";
+                font-size: Theme.base-font + 16px;
+                font-weight: 900;
+                color: Theme.colors.primary;
+                horizontal-alignment: center;
+                accessible-label: "Ale, My Eyes!";
+            }
+
+            Text {
+                text: "智能视觉辅助助手";
+                font-size: Theme.base-font;
+                color: Theme.colors.text-muted;
+                horizontal-alignment: center;
+            }
+        }
+
+        Card {
+            title: "系统状态";
+
+            StatusBadge {
+                label: root.status-text;
+                badge-color: root.status-type == "error" ? Theme.colors.danger
+                    : root.status-type == "recording" ? Theme.colors.warning
+                    : root.status-type == "processing" ? Theme.colors.info
+                    : root.status-type == "ready" ? Theme.colors.success
+                    : Theme.colors.info;
+                horizontal-stretch: 1;
+            }
+
+            if root.status-type == "error" : ActionButton {
+                label: "清除错误";
+                button-color: Theme.colors.text-muted;
+                clicked => { root.clear-error(); }
+            }
+        }
+
+        Card {
+            title: "主要操作";
+
+            VerticalLayout {
+                spacing: 12px;
+
+                ActionButton {
+                    icon: root.is-recording ? "⏹" : "🎙";
+                    label: root.is-recording ? "停止录音并转写" : "开始语音输入";
+                    button-color: root.is-recording ? Theme.colors.danger : Theme.colors.primary;
+                    enabled: (root.engine-ready && !root.is-busy) || root.is-recording;
+                    active: root.is-recording;
+                    clicked => { root.toggle-recording(); }
+                }
+
+                if root.is-recording : Rectangle {
+                    height: 24px;
+                    background: Theme.colors.warning.transparentize(0.85);
+                    border-radius: 8px;
+
+                    Text {
+                        text: "已录制 " + root.recording-seconds + " 秒 / 最长 60 秒";
+                        font-size: Theme.base-font - 2px;
+                        color: Theme.colors.text;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                ActionButton {
+                    icon: "🖼";
+                    label: "选择图片并描述";
+                    button-color: Theme.colors.secondary;
+                    enabled: root.engine-ready && !root.is-busy;
+                    clicked => { root.describe-image(); }
+                }
+
+                if root.last-image-info != "" : Text {
+                    text: root.last-image-info;
+                    font-size: Theme.base-font - 4px;
+                    color: Theme.colors.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.has-result : Card {
+            title: root.result-title;
+
+            if root.result-metadata != "" : Text {
+                text: root.result-metadata;
+                font-size: Theme.base-font - 4px;
+                color: Theme.colors.text-muted;
+            }
+
+            Rectangle {
+                background: Theme.colors.surface;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.colors.border;
+                min-height: 80px;
+
+                VerticalLayout {
+                    padding: 16px;
+
+                    Text {
+                        text: root.result-text;
+                        font-size: Theme.base-font;
+                        color: Theme.colors.text;
+                        wrap: word-wrap;
+                        accessible-label: root.result-text;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                ActionButton {
+                    icon: "🔊";
+                    label: "朗读结果";
+                    button-color: Theme.colors.secondary;
+                    enabled: root.engine-ready && !root.is-busy;
+                    horizontal-stretch: 1;
+                    clicked => { root.speak-result(); }
+                }
+
+                ActionButton {
+                    icon: "🗑";
+                    label: "清除";
+                    button-color: Theme.colors.text-muted;
+                    horizontal-stretch: 0;
+                    clicked => { root.clear-result(); }
+                }
+            }
+        }
+
+        if !root.has-result : Card {
+            Text {
+                text: "暂无结果";
+                font-size: Theme.base-font;
+                color: Theme.colors.text-muted;
+                horizontal-alignment: center;
+            }
+        }
+
+        Card {
+            Text {
+                text: "提示: 请先在设置中填写 API Key。录音最长 60 秒，停止后上传到云端转写。";
+                font-size: Theme.base-font - 4px;
+                color: Theme.colors.text-muted;
+                wrap: word-wrap;
+            }
+        }
+
+        Rectangle { height: 80px; }
+    }
+}

@@ -16,8 +16,9 @@
 ## Current Build Notes
 - `cargo check --workspace` is expected to pass as of this file's latest update.
 - `ale-server` uses Axum multipart extraction, so keep Axum's `multipart` feature enabled.
-- `ale-gui` uses iced `0.14`; app boot is `iced::application(AleApp::new, ...)` with `.title(...)`, subscriptions return `Subscription`, and `center_x/center_y` require explicit `Length` args.
-- `ale-gui` records audio through `cpal`; Linux checks/builds need `libasound2-dev` installed.
+- `ale-gui` uses Slint `1.16` for cross-platform UI (desktop + Android). The `.slint` UI files are in `ale-gui/ui/` and compiled by `slint-build` in `build.rs`.
+- `ale-gui` records audio through `cpal` on desktop and `oboe` on Android; Linux checks/builds need `libasound2-dev` and `libfontconfig-dev` installed.
+- `ale-gui` is a `cdylib` for Android builds via `cargo-apk`, and a regular binary for desktop.
 
 ## Architecture Notes
 - `ale-core/src/lib.rs` exposes `AleEngine` and gates local ASR/VLM/LLM/TTS modules behind features. Default features only enable `cloud`.
@@ -30,5 +31,5 @@
 - GitHub Actions is the source of truth for release artifacts: tag `v*` or manual dispatch publishes exactly one Ubuntu `.deb`, one Windows `.exe`, and one Android `.apk` to the GitHub Release.
 - Linux packaging: `./scripts/package-linux.sh` builds release binaries and writes `ale-my-eyes-linux/` plus an archive in the repo root.
 - Windows packaging: `./scripts/package-windows.sh` adds the `x86_64-pc-windows-msvc` target and writes `ale-my-eyes-windows/` plus a zip when zip/7z exists.
-- Android packaging: `./scripts/package-android.sh` requires `ANDROID_NDK_ROOT`, installs `cargo-ndk` if missing, and generates an Android Gradle project under `ale-my-eyes-android/`.
+- Android packaging: `./scripts/package-android.sh` requires `ANDROID_NDK_ROOT`, installs `cargo-apk` if missing, and builds APKs via `cargo apk build`.
 - `./scripts/create-release.sh` deletes and recreates `release/`; use it only when intentionally regenerating release bundles.

@@ -1,0 +1,246 @@
+import { ScrollView, LineEdit, CheckBox } from "std-widgets.slint";
+import { Card, ActionButton, LabeledInput, SectionTitle, StatusBadge, Theme } from "widgets.slint";
+
+export component SettingsScreen inherits ScrollView {
+    in property <string> provider: "";
+    in property <string> api-key: "";
+    in property <string> api-url: "";
+    in property <string> model: "";
+    in property <string> language: "";
+    in property <string> font-size: "";
+    in property <bool> high-contrast: false;
+    in property <bool> auto-speak: true;
+    in property <bool> show-api-key: false;
+    in property <bool> is-busy: false;
+    in property <string> status-text: "";
+    in property <string> status-type: "info";
+
+    callback provider-changed(string);
+    callback api-key-changed(string);
+    callback api-url-changed(string);
+    callback model-changed(string);
+    callback language-changed(string);
+    callback font-size-changed(string);
+    callback high-contrast-changed(bool);
+    callback auto-speak-changed(bool);
+    callback toggle-api-key-visible();
+    callback save-settings();
+    callback test-connection();
+    callback go-back();
+
+    mouse-drag-pan-enabled: true;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        SectionTitle {
+            text: "⚙️ 设置";
+        }
+
+        Card {
+            title: "☁️ 云端 API";
+
+            Text {
+                text: "当前后端按 OpenAI 兼容接口调用";
+                font-size: Theme.base-font - 4px;
+                color: Theme.colors.text-muted;
+                wrap: word-wrap;
+            }
+
+            LabeledInput {
+                label: "Provider";
+                placeholder: "openai";
+                value: root.provider;
+                edited(text) => { root.provider-changed(text); }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+
+                Text {
+                    text: "API Key";
+                    font-size: Theme.base-font - 2px;
+                    font-weight: 600;
+                    color: Theme.colors.text;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    LineEdit {
+                        text: root.api-key;
+                        placeholder-text: "sk-...";
+                        font-size: Theme.base-font;
+                        height: 48px;
+                        horizontal-stretch: 1;
+                        accessible-label: "API Key";
+                        edited(text) => { root.api-key-changed(text); }
+                    }
+
+                    ActionButton {
+                        label: root.show-api-key ? "隐藏" : "显示";
+                        button-color: Theme.colors.text-muted;
+                        horizontal-stretch: 0;
+                        height: 48px;
+                        clicked => { root.toggle-api-key-visible(); }
+                    }
+                }
+            }
+
+            LabeledInput {
+                label: "API URL";
+                placeholder: "https://api.openai.com/v1";
+                value: root.api-url;
+                edited(text) => { root.api-url-changed(text); }
+            }
+
+            LabeledInput {
+                label: "Model";
+                placeholder: "gpt-4o";
+                value: root.model;
+                edited(text) => { root.model-changed(text); }
+            }
+        }
+
+        Card {
+            title: "🎨 界面";
+
+            LabeledInput {
+                label: "语言";
+                placeholder: "zh-CN";
+                value: root.language;
+                edited(text) => { root.language-changed(text); }
+            }
+
+            LabeledInput {
+                label: "字体大小";
+                placeholder: "18";
+                value: root.font-size;
+                edited(text) => { root.font-size-changed(text); }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+
+                Rectangle {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 8px;
+                    background: Theme.colors.surface;
+                    border-width: 2px;
+                    border-color: root.high-contrast ? Theme.colors.primary : Theme.colors.border;
+
+                    TouchArea {
+                        clicked => { root.high-contrast-changed(!root.high-contrast); }
+                    }
+
+                    if root.high-contrast : Text {
+                        text: "✓";
+                        font-size: 24px;
+                        color: Theme.colors.primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "高对比模式";
+                        font-size: Theme.base-font;
+                        font-weight: 600;
+                        color: Theme.colors.text;
+                    }
+                    Text {
+                        text: "增强文字与背景对比度";
+                        font-size: Theme.base-font - 4px;
+                        color: Theme.colors.text-muted;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+
+                Rectangle {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 8px;
+                    background: Theme.colors.surface;
+                    border-width: 2px;
+                    border-color: root.auto-speak ? Theme.colors.primary : Theme.colors.border;
+
+                    TouchArea {
+                        clicked => { root.auto-speak-changed(!root.auto-speak); }
+                    }
+
+                    if root.auto-speak : Text {
+                        text: "✓";
+                        font-size: 24px;
+                        color: Theme.colors.primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "自动语音播报";
+                        font-size: Theme.base-font;
+                        font-weight: 600;
+                        color: Theme.colors.text;
+                    }
+                    Text {
+                        text: "操作结果自动朗读";
+                        font-size: Theme.base-font - 4px;
+                        color: Theme.colors.text-muted;
+                    }
+                }
+            }
+        }
+
+        if root.status-text != "" : Card {
+            StatusBadge {
+                label: root.status-text;
+                badge-color: root.status-type == "error" ? Theme.colors.danger
+                    : root.status-type == "success" ? Theme.colors.success
+                    : Theme.colors.info;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            ActionButton {
+                icon: "💾";
+                label: "保存设置";
+                button-color: Theme.colors.primary;
+                enabled: !root.is-busy;
+                horizontal-stretch: 1;
+                clicked => { root.save-settings(); }
+            }
+
+            ActionButton {
+                icon: "🔗";
+                label: "测试连接";
+                button-color: Theme.colors.info;
+                enabled: !root.is-busy;
+                horizontal-stretch: 1;
+                clicked => { root.test-connection(); }
+            }
+        }
+
+        ActionButton {
+            icon: "←";
+            label: "返回主界面";
+            button-color: Theme.colors.text-muted;
+            clicked => { root.go-back(); }
+        }
+
+        Rectangle { height: 40px; }
+    }
+}

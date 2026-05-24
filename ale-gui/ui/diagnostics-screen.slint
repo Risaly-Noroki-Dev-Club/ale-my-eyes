@@ -1,0 +1,152 @@
+import { ScrollView } from "std-widgets.slint";
+import { Card, ActionButton, SectionTitle, Theme } from "widgets.slint";
+
+export component DiagnosticsScreen inherits ScrollView {
+    in property <string> engine-status: "未初始化";
+    in property <string> api-url: "";
+    in property <string> model: "";
+    in property <bool> auto-speak: true;
+    in property <bool> high-contrast: false;
+    in property <string> recent-errors: "";
+
+    callback go-back();
+
+    mouse-drag-pan-enabled: true;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        SectionTitle {
+            text: "🔍 诊断信息";
+        }
+
+        Card {
+            title: "引擎状态";
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                Rectangle {
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 8px;
+                    background: root.engine-status == "已初始化" ? Theme.colors.success : Theme.colors.danger;
+                }
+
+                Text {
+                    text: root.engine-status;
+                    font-size: Theme.base-font;
+                    color: Theme.colors.text;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Card {
+            title: "配置信息";
+
+            VerticalLayout {
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "API URL:";
+                        font-size: Theme.base-font - 2px;
+                        font-weight: 600;
+                        color: Theme.colors.text-muted;
+                    }
+                    Text {
+                        text: root.api-url;
+                        font-size: Theme.base-font - 2px;
+                        color: Theme.colors.text;
+                        overflow: elide;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "模型:";
+                        font-size: Theme.base-font - 2px;
+                        font-weight: 600;
+                        color: Theme.colors.text-muted;
+                    }
+                    Text {
+                        text: root.model;
+                        font-size: Theme.base-font - 2px;
+                        color: Theme.colors.text;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "自动语音:";
+                        font-size: Theme.base-font - 2px;
+                        font-weight: 600;
+                        color: Theme.colors.text-muted;
+                    }
+                    Text {
+                        text: root.auto-speak ? "开启" : "关闭";
+                        font-size: Theme.base-font - 2px;
+                        color: root.auto-speak ? Theme.colors.success : Theme.colors.text-muted;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "高对比模式:";
+                        font-size: Theme.base-font - 2px;
+                        font-weight: 600;
+                        color: Theme.colors.text-muted;
+                    }
+                    Text {
+                        text: root.high-contrast ? "开启" : "关闭";
+                        font-size: Theme.base-font - 2px;
+                        color: root.high-contrast ? Theme.colors.success : Theme.colors.text-muted;
+                    }
+                }
+            }
+        }
+
+        Card {
+            title: "最近错误";
+
+            if root.recent-errors == "" : Text {
+                text: "无错误记录";
+                font-size: Theme.base-font - 2px;
+                color: Theme.colors.text-muted;
+            }
+
+            if root.recent-errors != "" : Rectangle {
+                background: Theme.colors.danger.transparentize(0.9);
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.colors.danger.transparentize(0.7);
+
+                VerticalLayout {
+                    padding: 16px;
+
+                    Text {
+                        text: root.recent-errors;
+                        font-size: Theme.base-font - 4px;
+                        color: Theme.colors.danger;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        ActionButton {
+            icon: "←";
+            label: "返回主界面";
+            button-color: Theme.colors.text-muted;
+            clicked => { root.go-back(); }
+        }
+
+        Rectangle { height: 40px; }
+    }
+}

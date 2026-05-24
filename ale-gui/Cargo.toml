@@ -3,13 +3,61 @@ name = "ale-gui"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 ale-core = { path = "../ale-core" }
-iced = { version = "0.14", features = ["tokio", "svg", "image"] }
+slint = "1.16"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rfd = "0.15"
-cpal = "0.15"
 hound = "3"
+
+# Desktop-only dependencies
+[target.'cfg(not(target_os = "android"))'.dependencies]
+cpal = "0.15"
 rodio = "0.19"
+rfd = "0.15"
+
+# Android-only dependencies
+[target.'cfg(target_os = "android")'.dependencies]
+oboe = "0.6"
+jni = "0.21"
+ndk-context = "0.1"
+
+[[bin]]
+name = "ale-gui"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.16"
+
+[package.metadata.android]
+package = "com.alemyeyes"
+label = "Ale, My Eyes!"
+version-code = 1
+target-sdk-version = 34
+min-sdk-version = 26
+
+[package.metadata.android.application]
+icon = "@mipmap/ic_launcher"
+theme = "@android:style/Theme.Material.Light.NoActionBar"
+
+[[package.metadata.android.permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.permission]]
+name = "android.permission.RECORD_AUDIO"
+
+[[package.metadata.android.permission]]
+name = "android.permission.MODIFY_AUDIO_SETTINGS"
+
+[[package.metadata.android.permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.CAMERA"

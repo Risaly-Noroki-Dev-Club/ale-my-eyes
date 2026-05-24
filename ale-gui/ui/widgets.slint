@@ -1,0 +1,224 @@
+import { Button, LineEdit, CheckBox, ScrollView, VerticalBox, HorizontalBox, Switch } from "std-widgets.slint";
+
+export struct ColorScheme {
+    primary: brush,
+    secondary: brush,
+    bg: brush,
+    surface: brush,
+    card: brush,
+    border: brush,
+    text: brush,
+    text-muted: brush,
+    text-inverse: brush,
+    danger: brush,
+    success: brush,
+    info: brush,
+    warning: brush,
+}
+
+export global Theme {
+    in property <ColorScheme> colors: {
+        primary: #764ba2,
+        secondary: #667eea,
+        bg: #f4f4f9,
+        surface: #f8f9fa,
+        card: #ffffff,
+        border: #e9ecef,
+        text: #333333,
+        text-muted: #6c757d,
+        text-inverse: #ffffff,
+        danger: #dc3545,
+        success: #28a745,
+        info: #17a2b8,
+        warning: #ffc107,
+    };
+    in property <bool> high-contrast: false;
+    in property <length> base-font: 18px;
+}
+
+export component Card inherits Rectangle {
+    in property <string> title;
+    in property <length> card-padding: 20px;
+    background: Theme.colors.card;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: Theme.colors.border;
+    drop-shadow-color: rgba(0, 0, 0, 0.08);
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 4px;
+
+    VerticalLayout {
+        padding: root.card-padding;
+        spacing: 12px;
+
+        if root.title != "" : Text {
+            text: root.title;
+            font-size: Theme.base-font + 4px;
+            font-weight: 700;
+            color: Theme.colors.text;
+            accessible-label: root.title;
+        }
+
+        @children
+    }
+}
+
+export component StatusBadge inherits Rectangle {
+    in property <string> label;
+    in property <brush> badge-color: Theme.colors.info;
+    height: 36px;
+    background: root.badge-color;
+    border-radius: 18px;
+    horizontal-stretch: 0;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: Theme.base-font - 2px;
+            font-weight: 600;
+            color: Theme.colors.text-inverse;
+            accessible-label: root.label;
+        }
+    }
+}
+
+export component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <brush> button-color: Theme.colors.primary;
+    in property <bool> enabled: true;
+    in property <bool> active: false;
+    callback clicked;
+
+    height: 64px;
+    border-radius: 16px;
+    background: touch.pressed ? root.button-color.darker(15%) : touch.has-hover ? root.button-color.darker(8%) : root.button-color;
+    accessible-label: root.label;
+    accessible-role: button;
+    clip: true;
+
+    touch := TouchArea {
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 12px;
+        alignment: center;
+
+        if root.icon != "" : Text {
+            text: root.icon;
+            font-size: Theme.base-font + 6px;
+            color: Theme.colors.text-inverse;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            font-size: Theme.base-font + 2px;
+            font-weight: 700;
+            color: Theme.colors.text-inverse;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    states [
+        disabled when !root.enabled: {
+            background: Theme.colors.border;
+            root.opacity: 0.6;
+        }
+        active when root.active: {
+            background: Theme.colors.danger;
+        }
+    ]
+}
+
+export component LabeledInput inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <string> value;
+    in property <bool> secure: false;
+    callback edited(string);
+
+    spacing: 6px;
+
+    Text {
+        text: root.label;
+        font-size: Theme.base-font - 2px;
+        font-weight: 600;
+        color: Theme.colors.text;
+    }
+
+    LineEdit {
+        text: root.value;
+        placeholder-text: root.placeholder;
+        font-size: Theme.base-font;
+        height: 48px;
+        accessible-label: root.label;
+        edited(text) => {
+            root.edited(text);
+        }
+    }
+}
+
+export component SectionTitle inherits Text {
+    font-size: Theme.base-font + 6px;
+    font-weight: 700;
+    color: Theme.colors.text;
+}
+
+export component NavButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked;
+
+    height: 64px;
+    border-radius: 12px;
+    background: touch.has-hover ? Theme.colors.surface : transparent;
+    accessible-label: root.label;
+    accessible-role: tab;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+        alignment: center;
+
+        Text {
+            text: root.icon;
+            font-size: 24px;
+            horizontal-alignment: center;
+            color: root.active ? Theme.colors.primary : Theme.colors.text-muted;
+        }
+
+        Text {
+            text: root.label;
+            font-size: Theme.base-font - 6px;
+            font-weight: root.active ? 700 : 400;
+            horizontal-alignment: center;
+            color: root.active ? Theme.colors.primary : Theme.colors.text-muted;
+        }
+    }
+
+    states [
+        active when root.active: {
+            background: Theme.colors.primary.transparentize(0.9);
+        }
+    ]
+}
