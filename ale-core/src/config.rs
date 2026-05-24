@@ -341,8 +341,20 @@ impl ConfigValidator {
             return Err(AleError::ConfigError("API URL is required".to_string()));
         }
 
+        if !config.api_url.starts_with("http://") && !config.api_url.starts_with("https://") {
+            return Err(AleError::ConfigError(
+                "API URL must start with http:// or https://".to_string(),
+            ));
+        }
+
         if config.model.is_empty() {
             return Err(AleError::ConfigError("Model name is required".to_string()));
+        }
+
+        if config.timeout == 0 {
+            return Err(AleError::ConfigError(
+                "Timeout must be greater than 0".to_string(),
+            ));
         }
 
         Ok(())
@@ -378,5 +390,106 @@ impl ConfigValidator {
         }
 
         Ok(())
+    }
+
+    /// 验证完整配置
+    pub fn validate_all(config: &AppConfig) -> Result<()> {
+        Self::validate_cloud_api(&config.cloud_api)?;
+        Self::validate_models(&config.models)?;
+        Self::validate_inference(&config.inference)?;
+
+        if config.ui.font_size == 0 {
+            return Err(AleError::ConfigError(
+                "Font size must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = AppConfig::default();
+        assert_eq!(config.cloud_api.provider, "openai");
+        assert_eq!(config.cloud_api.api_url, "https://api.openai.com/v1");
+        assert_eq!(config.cloud_api.model, "gpt-4o");
+        assert_eq!(config.cloud_api.max_tokens, 1024);
+        assert_eq!(config.cloud_api.timeout, 30);
+        assert_eq!(config.ui.language, "zh-CN");
+        assert_eq!(config.ui.font_size, 16);
+        assert!(!config.ui.high_contrast);
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let config = AppConfig::default();
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.cloud_api.provider, config.cloud_api.provider);
+        assert_eq!(restored.cloud_api.api_url, config.cloud_api.api_url);
+        assert_eq!(restored.ui.language, config.ui.language);
+    }
+
+    #[test]
+    fn test_validate_cloud_api_missing_key() {
+        let config = CloudApiConfig {
+            api_key: String::new(),
+            ..Default::default()
+        };
+        assert!(ConfigValidator::validate_cloud_api(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_cloud_api_bad_url() {
+        let config = CloudApiConfig {
+            api_key: "sk-test".to_string(),
+            api_url: "not-a-url".to_string(),
+            ..Default::default()
+        };
+        assert!(ConfigValidator::validate_cloud_api(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_cloud_api_valid() {
+        let config = CloudApiConfig {
+            api_key: "sk-test".to_string(),
+            api_url: "https://api.openai.com/v1".to_string(),
+            model: "gpt-4o".to_string(),
+            ..Default::default()
+        };
+        assert!(ConfigValidator::validate_cloud_api(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_inference_invalid_mode() {
+        let config = InferenceConfig {
+            mode: "invalid".to_string(),
+            ..Default::default()
+        };
+        assert!(ConfigValidator::validate_inference(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_all_valid() {
+        let config = AppConfig::default();
+        let mut config = config;
+        config.cloud_api.api_key = "sk-test".to_string();
+        assert!(ConfigValidator::validate_all(&config).is_ok());
+    }
+
+    #[test]
+    fn test_config_manager_load_creates_default() {
+        let path = std::path::PathBuf::from("/tmp/ale-my-eyes-test-unit/config.json");
+        let _ = std::fs::remove_file(&path);
+        let mut manager = ConfigManager::new(&path);
+        manager.load().unwrap();
+        assert_eq!(manager.config().cloud_api.provider, "openai");
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
     }
 }

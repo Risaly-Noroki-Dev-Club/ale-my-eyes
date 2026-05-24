@@ -321,3 +321,45 @@ impl CloudApiFactory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cloud_config_default() {
+        let config = CloudConfig::default();
+        assert_eq!(config.api_url, "https://api.openai.com/v1");
+        assert_eq!(config.model, "gpt-4o");
+        assert_eq!(config.max_tokens, 1024);
+        assert_eq!(config.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_cloud_provider_serialization() {
+        let provider = CloudProvider::OpenAI;
+        let json = serde_json::to_string(&provider).unwrap();
+        let restored: CloudProvider = serde_json::from_str(&json).unwrap();
+        assert!(matches!(restored, CloudProvider::OpenAI));
+    }
+
+    #[test]
+    fn test_cloud_api_factory_creates_openai() {
+        let config = CloudConfig {
+            provider: CloudProvider::OpenAI,
+            api_key: "test".to_string(),
+            ..Default::default()
+        };
+        let _api = CloudApiFactory::create(config);
+    }
+
+    #[test]
+    fn test_cloud_api_factory_custom_provider() {
+        let config = CloudConfig {
+            provider: CloudProvider::Custom("test".to_string()),
+            api_key: "test".to_string(),
+            ..Default::default()
+        };
+        let _api = CloudApiFactory::create(config);
+    }
+}

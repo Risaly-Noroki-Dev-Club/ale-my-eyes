@@ -305,3 +305,65 @@ impl AleEngineFactory {
         AleEngine::new(&config_path).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cloud_config_from_app_openai() {
+        let app_config = config::CloudApiConfig {
+            provider: "openai".to_string(),
+            api_key: "sk-test".to_string(),
+            api_url: "https://api.openai.com/v1".to_string(),
+            model: "gpt-4o".to_string(),
+            max_tokens: 512,
+            timeout: 60,
+        };
+        let cloud_config = AleEngine::cloud_config_from_app(&app_config);
+        assert!(matches!(
+            cloud_config.provider,
+            cloud::CloudProvider::OpenAI
+        ));
+        assert_eq!(cloud_config.api_key, "sk-test");
+        assert_eq!(cloud_config.model, "gpt-4o");
+        assert_eq!(cloud_config.max_tokens, 512);
+    }
+
+    #[test]
+    fn test_cloud_config_from_app_anthropic() {
+        let app_config = config::CloudApiConfig {
+            provider: "anthropic".to_string(),
+            ..Default::default()
+        };
+        let cloud_config = AleEngine::cloud_config_from_app(&app_config);
+        assert!(matches!(
+            cloud_config.provider,
+            cloud::CloudProvider::Anthropic
+        ));
+    }
+
+    #[test]
+    fn test_cloud_config_from_app_custom() {
+        let app_config = config::CloudApiConfig {
+            provider: "my-provider".to_string(),
+            ..Default::default()
+        };
+        let cloud_config = AleEngine::cloud_config_from_app(&app_config);
+        if let cloud::CloudProvider::Custom(name) = cloud_config.provider {
+            assert_eq!(name, "my-provider");
+        } else {
+            panic!("Expected Custom provider");
+        }
+    }
+
+    #[test]
+    fn test_engine_status_default() {
+        let status = EngineStatus {
+            cloud_ready: false,
+            tts_ready: false,
+        };
+        assert!(!status.cloud_ready);
+        assert!(!status.tts_ready);
+    }
+}

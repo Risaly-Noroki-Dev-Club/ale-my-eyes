@@ -1,8 +1,9 @@
 use ale_core::config::AppConfig;
 use ale_core::{AleEngine, AleEngineFactory};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use iced::keyboard::{key::Named, Key};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input};
-use iced::{time, Alignment, Element, Length, Subscription, Task};
+use iced::{event, keyboard, time, Alignment, Element, Length, Subscription, Task};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -25,12 +26,15 @@ struct AleApp {
     recording_started: Option<Instant>,
     last_image_info: Option<String>,
     show_api_key: bool,
+    auto_speak: bool,
+    diagnostics: DiagnosticsInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Main,
     Settings,
+    Diagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -67,11 +71,19 @@ struct SettingsDraft {
     high_contrast: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct DiagnosticsInfo {
+    api_url: String,
+    model: String,
+    recent_errors: Vec<String>,
+}
+
 #[derive(Clone)]
 enum Message {
     EngineReady(Result<(Arc<Mutex<AleEngine>>, AppConfig), String>),
     ShowMain,
     ShowSettings,
+    ShowDiagnostics,
     ProviderChanged(String),
     ApiKeyChanged(String),
     ApiUrlChanged(String),
@@ -79,6 +91,7 @@ enum Message {
     LanguageChanged(String),
     FontSizeChanged(String),
     HighContrastChanged(bool),
+    AutoSpeakChanged(bool),
     ToggleApiKeyVisible,
     SaveSettings,
     SettingsSaved(Result<(Arc<Mutex<AleEngine>>, AppConfig), String>),
@@ -93,6 +106,8 @@ enum Message {
     ResultSpoken(Result<(), String>),
     ClearResult,
     ClearError,
+    KeyPressed(keyboard::Event),
+    StatusSpoken(()),
 }
 
 impl AleApp {
@@ -108,6 +123,8 @@ impl AleApp {
                 recording_started: None,
                 last_image_info: None,
                 show_api_key: false,
+                auto_speak: true,
+                diagnostics: DiagnosticsInfo::default(),
             },
             Task::perform(create_engine(), Message::EngineReady),
         )
@@ -118,11 +135,17 @@ impl AleApp {
             Message::EngineReady(Ok((engine, config))) => {
                 self.engine = Some(engine);
                 self.settings = SettingsDraft::from_config(&config);
+                self.diagnostics = DiagnosticsInfo {
+                    api_url: config.cloud_api.api_url.clone(),
+                    model: config.cloud_api.model.clone(),
+                    recent_errors: Vec::new(),
+                };
                 self.status = AppStatus::Ready;
-                Task::none()
+                self.auto_speak_when_ready("初始化完成")
             }
             Message::EngineReady(Err(error)) => {
                 self.status = AppStatus::Error(format!("初始化失败: {error}"));
+                self.diagnostics.recent_errors.push(error.clone());
                 Task::none()
             }
             Message::ShowMain => {
@@ -131,6 +154,10 @@ impl AleApp {
             }
             Message::ShowSettings => {
                 self.screen = Screen::Settings;
+                Task::none()
+            }
+            Message::ShowDiagnostics => {
+                self.screen = Screen::Diagnostics;
                 Task::none()
             }
             Message::ProviderChanged(value) => {
@@ -159,6 +186,10 @@ impl AleApp {
             }
             Message::HighContrastChanged(value) => {
                 self.settings.high_contrast = value;
+                Task::none()
+            }
+            Message::AutoSpeakChanged(value) => {
+                self.auto_speak = value;
                 Task::none()
             }
             Message::SaveSettings => {
@@ -226,13 +257,14 @@ impl AleApp {
                             self.recorder = Some(recorder);
                             self.recording_started = Some(Instant::now());
                             self.status = AppStatus::Recording;
+                            return self.auto_speak_status("开始录音");
                         }
                         Err(error) => {
-                            self.status = AppStatus::Error(error);
+                            self.status = AppStatus::Error(error.clone());
+                            self.diagnostics.recent_errors.push(error);
+                            return Task::none();
                         }
                     }
-
-                    return Task::none();
                 }
 
                 let Some(engine) = self.engine.clone() else {
@@ -277,13 +309,14 @@ impl AleApp {
                 self.status = AppStatus::Ready;
                 self.result = Some(AppResult {
                     kind: ResultKind::Transcription,
-                    text,
+                    text: text.clone(),
                     metadata: None,
                 });
-                Task::none()
+                self.auto_speak_when_ready(&format!("识别完成: {text}"))
             }
             Message::TranscriptionFinished(Err(error)) => {
                 self.status = AppStatus::Error(format!("语音识别失败: {error}"));
+                self.diagnostics.recent_errors.push(error.clone());
                 Task::none()
             }
             Message::DescribeImage => {
@@ -298,11 +331,13 @@ impl AleApp {
             Message::ImageDescriptionFinished(Ok(result)) => {
                 self.status = AppStatus::Ready;
                 self.last_image_info = result.metadata.clone();
+                let speak_text = format!("图片描述完成: {}", result.text);
                 self.result = Some(result);
-                Task::none()
+                self.auto_speak_when_ready(&speak_text)
             }
             Message::ImageDescriptionFinished(Err(error)) => {
                 self.status = AppStatus::Error(format!("图片描述失败: {error}"));
+                self.diagnostics.recent_errors.push(error.clone());
                 Task::none()
             }
             Message::ClearResult => {
@@ -336,6 +371,45 @@ impl AleApp {
                 }
                 Task::none()
             }
+            Message::KeyPressed(event) => {
+                if let keyboard::Event::KeyPressed { key, modifiers, .. } = event {
+                    let cmd = modifiers.command();
+                    match key.as_ref() {
+                        Key::Character("r") if cmd => self.update(Message::ToggleRecording),
+                        Key::Character("o") if cmd => {
+                            if self.engine.is_some() && !self.is_busy() {
+                                self.update(Message::DescribeImage)
+                            } else {
+                                Task::none()
+                            }
+                        }
+                        Key::Character("l") if cmd => {
+                            if self.result.is_some() && self.engine.is_some() && !self.is_busy() {
+                                self.update(Message::SpeakResult)
+                            } else {
+                                Task::none()
+                            }
+                        }
+                        Key::Character("s") if cmd && self.screen == Screen::Settings => {
+                            self.update(Message::SaveSettings)
+                        }
+                        Key::Character("d") if cmd => self.update(Message::ShowDiagnostics),
+                        Key::Named(Named::Escape) => {
+                            if matches!(self.status, AppStatus::Error(_)) {
+                                self.update(Message::ClearError)
+                            } else if self.screen != Screen::Main {
+                                self.update(Message::ShowMain)
+                            } else {
+                                Task::none()
+                            }
+                        }
+                        _ => Task::none(),
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            Message::StatusSpoken(_) => Task::none(),
         }
     }
 
@@ -343,6 +417,7 @@ impl AleApp {
         match self.screen {
             Screen::Main => self.view_main(),
             Screen::Settings => self.view_settings(),
+            Screen::Diagnostics => self.view_diagnostics(),
         }
     }
 
@@ -383,30 +458,37 @@ impl AleApp {
             button(text("设置").size(18))
                 .padding(16)
                 .on_press_maybe((!busy).then_some(Message::ShowSettings)),
+            button(text("诊断").size(18))
+                .padding(16)
+                .style(button::text)
+                .on_press_maybe((!busy).then_some(Message::ShowDiagnostics)),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
 
-        let content = column![
-            self.status_card(),
-            container(
-                column![
+        let content =
+            column![
+                self.status_card(),
+                container(
+                    column![
                     text("主要操作").size(24),
                     controls,
                     text("请先在设置中填写 API key。录音最长 60 秒，停止后上传到云端转写。")
                         .size(14),
+                    text("快捷键: Ctrl+R 录音 | Ctrl+O 图片 | Ctrl+L 朗读 | Ctrl+D 诊断 | Esc 返回")
+                        .size(12),
                     text(recording_hint).size(14),
                     text(image_hint).size(14),
                 ]
-                .spacing(12),
-            )
-            .padding(16)
-            .style(container::rounded_box),
-            self.result_card(),
-        ]
-        .spacing(24)
-        .padding(24)
-        .width(Length::Fill);
+                    .spacing(12),
+                )
+                .padding(16)
+                .style(container::rounded_box),
+                self.result_card(),
+            ]
+            .spacing(24)
+            .padding(24)
+            .width(Length::Fill);
 
         container(scrollable(content))
             .width(Length::Fill)
@@ -482,6 +564,9 @@ impl AleApp {
             checkbox(self.settings.high_contrast)
                 .label("高对比模式")
                 .on_toggle(Message::HighContrastChanged),
+            checkbox(self.auto_speak)
+                .label("自动语音播报")
+                .on_toggle(Message::AutoSpeakChanged),
             row![
                 button(text("保存设置").size(16))
                     .padding(12)
@@ -594,10 +679,91 @@ impl AleApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if self.recorder.is_some() {
+        let keyboard_sub = event::listen_with(|event, _status, _window| match event {
+            iced::Event::Keyboard(keyboard_event) => Some(Message::KeyPressed(keyboard_event)),
+            _ => None,
+        });
+
+        let tick_sub = if self.recorder.is_some() {
             time::every(Duration::from_secs(1)).map(|_| Message::Tick)
         } else {
             Subscription::none()
+        };
+
+        Subscription::batch(vec![keyboard_sub, tick_sub])
+    }
+
+    fn view_diagnostics(&self) -> Element<'_, Message> {
+        let engine_status = if self.engine.is_some() {
+            "已初始化"
+        } else {
+            "未初始化"
+        };
+
+        let errors_text = if self.diagnostics.recent_errors.is_empty() {
+            "无".to_string()
+        } else {
+            self.diagnostics.recent_errors.join("\n")
+        };
+
+        let content = column![
+            text("诊断信息").size(28),
+            text(format!("引擎状态: {engine_status}")).size(16),
+            text(format!("API URL: {}", self.diagnostics.api_url)).size(16),
+            text(format!("模型: {}", self.diagnostics.model)).size(16),
+            text(format!(
+                "自动语音: {}",
+                if self.auto_speak { "开启" } else { "关闭" }
+            ))
+            .size(16),
+            text(format!(
+                "高对比模式: {}",
+                if self.settings.high_contrast {
+                    "开启"
+                } else {
+                    "关闭"
+                }
+            ))
+            .size(16),
+            text("最近错误:").size(16),
+            text(errors_text).size(14),
+            button(text("返回主界面").size(16))
+                .padding(12)
+                .on_press(Message::ShowMain),
+        ]
+        .spacing(12)
+        .padding(24)
+        .width(Length::Fill);
+
+        container(scrollable(content))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .into()
+    }
+
+    fn auto_speak_when_ready(&mut self, text: &str) -> Task<Message> {
+        if self.auto_speak && self.engine.is_some() {
+            Task::perform(
+                speak_text_if_available(self.engine.clone(), text.to_string()),
+                |_| Message::StatusSpoken(()),
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    fn auto_speak_status(&self, text: &str) -> Task<Message> {
+        if self.auto_speak && self.engine.is_some() {
+            if let Some(engine) = self.engine.clone() {
+                Task::perform(speak_text(engine, text.to_string()), |_| {
+                    Message::StatusSpoken(())
+                })
+            } else {
+                Task::none()
+            }
+        } else {
+            Task::none()
         }
     }
 }
@@ -896,6 +1062,31 @@ async fn speak_text(engine: Arc<Mutex<AleEngine>>, text: String) -> Result<(), S
     tokio::task::spawn_blocking(move || play_audio(audio))
         .await
         .map_err(|error| format!("音频播放任务失败: {error}"))?
+}
+
+async fn speak_text_if_available(
+    engine: Option<Arc<Mutex<AleEngine>>>,
+    text: String,
+) -> Result<(), String> {
+    let Some(engine) = engine else {
+        return Ok(());
+    };
+    let audio = {
+        let engine = engine.lock().await;
+        if engine.config().cloud_api.api_key.trim().is_empty() {
+            return Ok(());
+        }
+        match engine.synthesize(&text).await {
+            Ok(audio) => audio,
+            Err(_) => return Ok(()),
+        }
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let _ = play_audio(audio);
+    })
+    .await
+    .map_err(|error| format!("音频播放任务失败: {error}"))
 }
 
 fn play_audio(audio: Vec<u8>) -> Result<(), String> {

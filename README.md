@@ -244,6 +244,9 @@ cargo run -p ale-cli -- synthesize --text "你好" --output speech.wav
 # 图片描述，输出到终端
 cargo run -p ale-cli -- describe --image screenshot.png
 
+# 测试云端连接
+cargo run -p ale-cli -- test-connection
+
 # 查看引擎状态
 cargo run -p ale-cli -- status
 ```
@@ -258,10 +261,12 @@ cargo run -p ale-server
 
 默认监听 `0.0.0.0:8000`，提供：
 
-- `GET /health`
-- `POST /asr/transcribe`
-- `POST /tts/synthesize`
-- `POST /vlm/describe`
+- `GET /health` - 健康检查
+- `GET /status` - 引擎详细状态
+- `GET /models` - 已下载模型列表
+- `POST /asr/transcribe` - 语音识别
+- `POST /tts/synthesize` - 语音合成
+- `POST /vlm/describe` - 图片描述
 
 接口详情见 [`docs/API.md`](docs/API.md)。
 
