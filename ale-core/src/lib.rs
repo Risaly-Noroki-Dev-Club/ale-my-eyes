@@ -1,10 +1,13 @@
+pub mod actions;
 pub mod cloud;
 pub mod config;
+pub mod context;
 pub mod downloader;
 pub mod error;
 pub mod inference;
 pub mod manager;
 pub mod types;
+pub mod vad;
 
 // 条件编译模块
 #[cfg(feature = "tts")]
@@ -32,6 +35,7 @@ pub struct AleEngine {
     model_manager: Arc<Mutex<manager::SmartModelManager>>,
     inference_engine: inference::AdaptiveInference,
     cloud_api: bool,
+    context_manager: context::ContextManager,
     #[cfg(feature = "tts")]
     tts: Option<Box<dyn tts::TextToSpeech>>,
 }
@@ -122,6 +126,7 @@ impl AleEngine {
             model_manager: Arc::new(Mutex::new(model_manager)),
             inference_engine,
             cloud_api: cloud_ready,
+            context_manager: context::ContextManager::new(4000),
             #[cfg(feature = "tts")]
             tts: None,
         })
@@ -235,6 +240,43 @@ impl AleEngine {
         Ok(result.data)
     }
 
+    /// 视觉问答：对图像提问并获取回答
+    pub async fn ask_about_image(
+        &self,
+        image_data: &[u8],
+        question: &str,
+    ) -> Result<cloud::VisionResponse> {
+        let result = self
+            .inference_engine
+            .ask_about_image(image_data, question, None)
+            .await?;
+        Ok(result.data)
+    }
+
+    /// 视觉问答（带工具调用支持）
+    pub async fn ask_about_image_with_tools(
+        &self,
+        image_data: &[u8],
+        question: &str,
+        tools: Vec<serde_json::Value>,
+    ) -> Result<cloud::VisionResponse> {
+        let result = self
+            .inference_engine
+            .ask_about_image(image_data, question, Some(tools))
+            .await?;
+        Ok(result.data)
+    }
+
+    /// 获取上下文管理器的可变引用
+    pub fn context_mut(&mut self) -> &mut context::ContextManager {
+        &mut self.context_manager
+    }
+
+    /// 获取上下文管理器的不可变引用
+    pub fn context(&self) -> &context::ContextManager {
+        &self.context_manager
+    }
+
     /// 自动下载推荐模型
     pub async fn auto_download_models(&self) -> Result<Vec<std::path::PathBuf>> {
         let mut manager = self.model_manager.lock().await;
@@ -330,6 +372,7 @@ impl Default for AleEngine {
             model_manager: Arc::new(Mutex::new(model_manager)),
             inference_engine,
             cloud_api: false,
+            context_manager: context::ContextManager::new(4000),
             #[cfg(feature = "tts")]
             tts: None,
         }

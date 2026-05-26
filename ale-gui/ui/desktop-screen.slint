@@ -1,0 +1,234 @@
+import { ScrollView, LineEdit } from "std-widgets.slint";
+import { Card, ActionButton, StatusBadge, Theme } from "widgets.slint";
+
+export component DesktopScreen inherits Rectangle {
+    in property <string> vad-state: "silent";
+    in property <string> transcription: "";
+    in property <string> ai-response: "";
+    in property <string> action-steps: "";
+    in property <string> status-text: "就绪";
+    in property <string> status-type: "ready";
+    in property <bool> is-busy: false;
+    in property <bool> engine-ready: false;
+    in property <bool> show-confirmation: false;
+    in property <string> confirmation-text: "";
+    in property <string> screen-context: "";
+    in property <string> text-input: "";
+
+    callback text-submitted(string);
+    callback confirm-action();
+    callback cancel-action();
+    callback toggle-monitoring();
+    callback clear-conversation();
+
+    background: Theme.colors.bg;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        // 顶部状态栏
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            // VAD 状态指示器
+            HorizontalLayout {
+                spacing: 6px;
+
+                Rectangle {
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: root.vad-state == "speaking" ? Theme.colors.success
+                        : root.vad-state == "speech_ended" ? Theme.colors.warning
+                        : Theme.colors.border;
+                }
+
+                Text {
+                    text: root.vad-state == "speaking" ? "说话中"
+                        : root.vad-state == "speech_ended" ? "处理中"
+                        : "监听中";
+                    font-size: Theme.base-font - 4px;
+                    color: Theme.colors.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 引擎状态
+            HorizontalLayout {
+                spacing: 4px;
+
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: root.engine-ready ? Theme.colors.success : Theme.colors.danger;
+                }
+
+                Text {
+                    text: root.engine-ready ? "就绪" : "离线";
+                    font-size: Theme.base-font - 6px;
+                    color: Theme.colors.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 语音转写区
+        if root.transcription != "" : Rectangle {
+            background: Theme.colors.primary.transparentize(0.9);
+            border-radius: 8px;
+            height: 36px;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+
+                Text {
+                    text: "🎙 " + root.transcription;
+                    font-size: Theme.base-font - 2px;
+                    color: Theme.colors.text;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // AI 回答区
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.colors.card;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.colors.border;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                if root.ai-response == "" && root.action-steps == "" : Text {
+                    text: "等待语音指令...";
+                    font-size: Theme.base-font - 2px;
+                    color: Theme.colors.text-muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                if root.ai-response != "" : ScrollView {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: root.ai-response;
+                            font-size: Theme.base-font - 2px;
+                            color: Theme.colors.text;
+                            wrap: word-wrap;
+                        }
+
+                        if root.action-steps != "" : Rectangle {
+                            background: Theme.colors.info.transparentize(0.9);
+                            border-radius: 8px;
+
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 4px;
+
+                                Text {
+                                    text: "操作步骤:";
+                                    font-size: Theme.base-font - 4px;
+                                    font-weight: 700;
+                                    color: Theme.colors.info;
+                                }
+
+                                Text {
+                                    text: root.action-steps;
+                                    font-size: Theme.base-font - 4px;
+                                    color: Theme.colors.text;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 确认对话框
+        if root.show-confirmation : Rectangle {
+            background: Theme.colors.warning.transparentize(0.9);
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.colors.warning;
+            height: 80px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "⚠️ " + root.confirmation-text;
+                    font-size: Theme.base-font - 2px;
+                    color: Theme.colors.text;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    ActionButton {
+                        label: "确认执行";
+                        button-color: Theme.colors.warning;
+                        height: 32px;
+                        clicked => { root.confirm-action(); }
+                    }
+
+                    ActionButton {
+                        label: "取消";
+                        button-color: Theme.colors.text-muted;
+                        height: 32px;
+                        clicked => { root.cancel-action(); }
+                    }
+                }
+            }
+        }
+
+        // 底部输入区
+        HorizontalLayout {
+            spacing: 8px;
+
+            LineEdit {
+                text: root.text-input;
+                placeholder-text: "也可以打字提问...";
+                font-size: Theme.base-font - 2px;
+                height: 36px;
+                horizontal-stretch: 1;
+                accepted(text) => { root.text-submitted(text); }
+            }
+
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 8px;
+                background: root.engine-ready ? Theme.colors.primary : Theme.colors.border;
+
+                Text {
+                    text: "📤";
+                    font-size: 16px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        if (root.engine-ready) {
+                            root.text-submitted(root.text-input);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

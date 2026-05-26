@@ -55,8 +55,16 @@ pub trait CloudApi: Send + Sync {
     /// 发送文本请求
     async fn chat(&self, messages: Vec<CloudMessage>) -> Result<CloudResponse>;
 
-    /// 发送图像请求
+    /// 发送图像请求（描述模式）
     async fn vision(&self, image_data: &[u8], prompt: &str) -> Result<CloudResponse>;
+
+    /// 发送图像请求（问答模式，支持 Function Calling）
+    async fn vision_ask(
+        &self,
+        image_data: &[u8],
+        question: &str,
+        tools: Option<Vec<serde_json::Value>>,
+    ) -> Result<VisionResponse>;
 
     /// 语音识别
     async fn transcribe(&self, audio_data: &[u8]) -> Result<CloudResponse>;
@@ -66,6 +74,31 @@ pub trait CloudApi: Send + Sync {
 
     /// 检查连接状态
     async fn health_check(&self) -> Result<bool>;
+}
+
+/// 视觉问答响应（支持 Function Calling）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisionResponse {
+    /// 文本回答
+    pub content: String,
+    /// 工具调用（如果有）
+    pub tool_calls: Option<Vec<ToolCall>>,
+    pub tokens_used: usize,
+    pub model: String,
+}
+
+/// 工具调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub function: FunctionCall,
+}
+
+/// 函数调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
 }
 
 /// 云端消息
@@ -253,6 +286,102 @@ impl CloudApi for OpenAIApi {
             tokens_used: 0,
             model: "whisper-1".to_string(),
             provider: CloudProvider::OpenAI,
+        })
+    }
+
+    async fn vision_ask(
+        &self,
+        image_data: &[u8],
+        question: &str,
+        tools: Option<Vec<serde_json::Value>>,
+    ) -> Result<VisionResponse> {
+        let url = format!("{}/chat/completions", self.config.api_url);
+
+        let image_base64 = general_purpose::STANDARD.encode(image_data);
+
+        let mut request_body = serde_json::json!({
+            "model": self.config.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你是 Ale, My Eyes! 智能视觉辅助助手。用户会发送一张图片和一个问题，请根据图片内容回答问题。如果用户要求执行操作，请使用提供的工具函数。"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": question
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:image/jpeg;base64,{}", image_base64)
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": self.config.max_tokens,
+        });
+
+        // 添加工具定义（如果有）
+        if let Some(tools) = tools {
+            request_body["tools"] = serde_json::json!(tools);
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| AleError::CloudApiError(format!("Request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AleError::CloudApiError(format!(
+                "API error: {}",
+                error_text
+            )));
+        }
+
+        let response_body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AleError::CloudApiError(format!("Parse error: {}", e)))?;
+
+        let message = &response_body["choices"][0]["message"];
+        let content = message["content"].as_str().unwrap_or_default().to_string();
+
+        let tool_calls = message["tool_calls"].as_array().map(|calls| {
+            calls
+                .iter()
+                .map(|tc| ToolCall {
+                    id: tc["id"].as_str().unwrap_or_default().to_string(),
+                    function: FunctionCall {
+                        name: tc["function"]["name"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        arguments: tc["function"]["arguments"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                    },
+                })
+                .collect()
+        });
+
+        let tokens_used = response_body["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize;
+
+        Ok(VisionResponse {
+            content,
+            tool_calls,
+            tokens_used,
+            model: self.config.model.clone(),
         })
     }
 

@@ -53,6 +53,14 @@ struct ImageDescriptionResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+struct VisionAskResponse {
+    answer: String,
+    tool_calls: Option<Vec<serde_json::Value>>,
+    success: bool,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct StatusResponse {
     version: String,
     cloud_ready: bool,
@@ -282,6 +290,77 @@ fn image_error(status: StatusCode, error: String) -> (StatusCode, Json<ImageDesc
     )
 }
 
+async fn ask_about_image(
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> (StatusCode, Json<VisionAskResponse>) {
+    let mut image_data: Option<Vec<u8>> = None;
+    let mut question: Option<String> = None;
+
+    let mut multipart = multipart;
+    while let Some(field) = multipart.next_field().await.unwrap_or(None) {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "question" {
+            if let Ok(text) = field.text().await {
+                question = Some(text);
+            }
+        } else if let Ok(bytes) = field.bytes().await {
+            if !bytes.is_empty() {
+                image_data = Some(bytes.to_vec());
+            }
+        }
+    }
+
+    let Some(image) = image_data else {
+        return vision_ask_error(StatusCode::BAD_REQUEST, "No image provided".to_string());
+    };
+    let Some(q) = question else {
+        return vision_ask_error(StatusCode::BAD_REQUEST, "No question provided".to_string());
+    };
+
+    let engine = state.engine.lock().await;
+    match engine.ask_about_image(&image, &q).await {
+        Ok(response) => (
+            StatusCode::OK,
+            Json(VisionAskResponse {
+                answer: response.content,
+                tool_calls: response.tool_calls.map(|calls| {
+                    calls
+                        .iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": tc.id,
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                }
+                            })
+                        })
+                        .collect()
+                }),
+                success: true,
+                error: None,
+            }),
+        ),
+        Err(error) => {
+            let status = classify_error(&error);
+            vision_ask_error(status, error.to_string())
+        }
+    }
+}
+
+fn vision_ask_error(status: StatusCode, error: String) -> (StatusCode, Json<VisionAskResponse>) {
+    (
+        status,
+        Json(VisionAskResponse {
+            answer: String::new(),
+            tool_calls: None,
+            success: false,
+            error: Some(error),
+        }),
+    )
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -299,6 +378,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/asr/transcribe", post(transcribe_audio))
         .route("/tts/synthesize", post(synthesize_text))
         .route("/vlm/describe", post(describe_image))
+        .route("/vlm/ask", post(ask_about_image))
         .layer(middleware::from_fn(request_logger))
         .layer(CorsLayer::permissive())
         .with_state(state);

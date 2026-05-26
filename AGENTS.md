@@ -18,10 +18,14 @@
 - `ale-server` uses Axum multipart extraction, so keep Axum's `multipart` feature enabled.
 - `ale-gui` uses Slint `1.16` for cross-platform UI (desktop + Android). The `.slint` UI files are in `ale-gui/ui/` and compiled by `slint-build` in `build.rs`.
 - `ale-gui` records audio through `cpal` on desktop and `oboe` on Android; Linux checks/builds need `libasound2-dev` and `libfontconfig-dev` installed.
+- `ale-gui` desktop also uses `xcap` (screen capture) and `enigo` (keyboard/mouse automation); Linux builds additionally need `libpipewire-0.3-dev`, `libwayland-dev`, `libxrandr-dev`, `libdbus-1-dev`, and `libegl-dev`.
 - `ale-gui` is a `cdylib` for Android builds via `cargo-apk`, and a regular binary for desktop.
 
 ## Architecture Notes
 - `ale-core/src/lib.rs` exposes `AleEngine` and gates local ASR/VLM/LLM/TTS modules behind features. Default features only enable `cloud`.
+- `ale-core/src/vad.rs` provides voice activity detection (energy-based VAD with state machine).
+- `ale-core/src/actions.rs` defines the action protocol for desktop automation (click, type, key, scroll, file ops).
+- `ale-core/src/context.rs` manages conversation context, visual memory, and long-term memory with auto-compaction.
 - Config defaults are created by `ConfigFactory::create_default()` under the user config directory `ale-my-eyes/config.json`; test config uses `/tmp/ale-my-eyes-test/config.json`.
 - Server routes are hardcoded in `ale-server/src/main.rs` on `0.0.0.0:8000`: `/health`, `/asr/transcribe`, `/tts/synthesize`, and `/vlm/describe`.
 - CLI subcommands exist in `ale-cli/src/main.rs`, but transcribe/synthesize/describe/status are still TODO stubs.

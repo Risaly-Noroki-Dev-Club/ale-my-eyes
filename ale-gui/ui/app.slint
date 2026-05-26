@@ -2,6 +2,7 @@ import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { MainScreen } from "main-screen.slint";
 import { SettingsScreen } from "settings-screen.slint";
 import { DiagnosticsScreen } from "diagnostics-screen.slint";
+import { DesktopScreen } from "desktop-screen.slint";
 import { NavButton, Theme } from "widgets.slint";
 
 export { Theme }
@@ -43,6 +44,16 @@ export component AppWindow inherits Window {
     in-out property <string> engine-status: "未初始化";
     in-out property <string> recent-errors: "";
 
+    // Desktop screen properties
+    in-out property <string> vad-state: "silent";
+    in-out property <string> transcription: "";
+    in-out property <string> ai-response: "";
+    in-out property <string> action-steps: "";
+    in-out property <bool> show-confirmation: false;
+    in-out property <string> confirmation-text: "";
+    in-out property <string> screen-context: "";
+    in-out property <string> text-input: "";
+
     // Callbacks
     callback toggle-recording();
     callback describe-image();
@@ -60,6 +71,11 @@ export component AppWindow inherits Window {
     callback high-contrast-changed(bool);
     callback auto-speak-changed(bool);
     callback toggle-api-key-visible();
+    callback text-submitted(string);
+    callback confirm-action();
+    callback cancel-action();
+    callback toggle-monitoring();
+    callback clear-conversation();
 
     VerticalLayout {
         // Screen content
@@ -119,11 +135,32 @@ export component AppWindow inherits Window {
                 engine-status: root.engine-status;
                 api-url: root.api-url;
                 model: root.model;
-                auto-speak: root.auto-speak;
+                auto-speak: root.auto_speak;
                 high-contrast: root.high-contrast;
                 recent-errors: root.recent-errors;
 
                 go-back => { root.current-screen = 0; }
+            }
+
+            if root.current-screen == 3: DesktopScreen {
+                vad-state: root.vad-state;
+                transcription: root.transcription;
+                ai-response: root.ai-response;
+                action-steps: root.action-steps;
+                status-text: root.status-text;
+                status-type: root.status-type;
+                is-busy: root.is-busy;
+                engine-ready: root.engine-ready;
+                show-confirmation: root.show-confirmation;
+                confirmation-text: root.confirmation-text;
+                screen-context: root.screen-context;
+                text-input: root.text-input;
+
+                text-submitted(text) => { root.text-submitted(text); }
+                confirm-action => { root.confirm-action(); }
+                cancel-action => { root.cancel-action(); }
+                toggle-monitoring => { root.toggle-monitoring(); }
+                clear-conversation => { root.clear-conversation(); }
             }
         }
 

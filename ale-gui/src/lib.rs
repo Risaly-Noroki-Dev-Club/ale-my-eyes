@@ -2,6 +2,15 @@ pub mod audio;
 pub mod file_picker;
 pub mod tts_player;
 
+#[cfg(target_os = "android")]
+pub mod camera;
+
+#[cfg(not(target_os = "android"))]
+pub mod screen_capture;
+
+#[cfg(not(target_os = "android"))]
+pub mod automation;
+
 use ale_core::config::AppConfig;
 use ale_core::{AleEngine, AleEngineFactory};
 use std::sync::Arc;

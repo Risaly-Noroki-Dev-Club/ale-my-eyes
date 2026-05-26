@@ -257,6 +257,43 @@ impl AdaptiveInference {
         })
     }
 
+    /// 视觉问答推理（支持自定义问题 + Function Calling）
+    pub async fn ask_about_image(
+        &self,
+        image_data: &[u8],
+        question: &str,
+        tools: Option<Vec<serde_json::Value>>,
+    ) -> Result<InferenceResult<crate::cloud::VisionResponse>> {
+        let start_time = Instant::now();
+
+        let mode = self.select_inference_mode(TaskComplexity::Complex);
+
+        let result = match mode {
+            InferenceMode::LocalOnly => {
+                return Err(AleError::Other(anyhow::anyhow!(
+                    "Local inference not available"
+                )));
+            }
+            InferenceMode::CloudOnly | InferenceMode::Adaptive => {
+                let cloud_api = self
+                    .cloud_api
+                    .as_ref()
+                    .ok_or(AleError::NotInitialized("Cloud API"))?;
+
+                cloud_api.vision_ask(image_data, question, tools).await?
+            }
+        };
+
+        let latency = start_time.elapsed();
+
+        Ok(InferenceResult {
+            data: result,
+            mode_used: mode,
+            latency,
+            tokens_used: None,
+        })
+    }
+
     /// 文本生成推理
     pub async fn generate(&self, prompt: &str) -> Result<InferenceResult<String>> {
         let start_time = Instant::now();
