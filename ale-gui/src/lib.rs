@@ -11,7 +11,9 @@ pub mod screen_capture;
 #[cfg(not(target_os = "android"))]
 pub mod automation;
 
+use ale_core::actions::ActionPlan;
 use ale_core::config::AppConfig;
+use ale_core::vad::{VadState, VoiceActivityDetector};
 use ale_core::{AleEngine, AleEngineFactory};
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,6 +27,15 @@ pub struct AppState {
     recording_started: Option<Instant>,
     auto_speak: bool,
     diagnostics_errors: Vec<String>,
+    vad: VoiceActivityDetector,
+    vad_active: bool,
+    #[cfg(not(target_os = "android"))]
+    screen_capture: Option<screen_capture::ScreenCapture>,
+    #[cfg(not(target_os = "android"))]
+    automation: Option<automation::AutomationEngine>,
+    #[cfg(target_os = "android")]
+    camera: Option<camera::AndroidCamera>,
+    pending_plan: Option<ActionPlan>,
 }
 
 impl Default for AppState {
@@ -41,6 +52,15 @@ impl AppState {
             recording_started: None,
             auto_speak: true,
             diagnostics_errors: Vec::new(),
+            vad: VoiceActivityDetector::with_default_config(),
+            vad_active: false,
+            #[cfg(not(target_os = "android"))]
+            screen_capture: None,
+            #[cfg(not(target_os = "android"))]
+            automation: None,
+            #[cfg(target_os = "android")]
+            camera: None,
+            pending_plan: None,
         }
     }
 }
@@ -49,7 +69,7 @@ pub fn setup_app(app: &AppWindow) {
     let state = Arc::new(Mutex::new(AppState::new()));
     let app_weak = app.as_weak();
 
-    // Initialize engine
+    // Initialize engine + start monitoring
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -68,6 +88,40 @@ pub fn setup_app(app: &AppWindow) {
                     app.set_status_type("ready".into());
                     app.set_api_url(config.cloud_api.api_url.into());
                     app.set_model(config.cloud_api.model.into());
+
+                    // Desktop: start screen capture + automation
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        let sc = screen_capture::ScreenCapture::new(
+                            screen_capture::CaptureConfig::default(),
+                        );
+                        if let Err(e) = sc.start() {
+                            tracing::warn!("Screen capture failed to start: {}", e);
+                        } else {
+                            st.screen_capture = Some(sc);
+                        }
+
+                        match automation::AutomationEngine::new(
+                            automation::AutomationConfig::default(),
+                        ) {
+                            Ok(ae) => st.automation = Some(ae),
+                            Err(e) => tracing::warn!("Automation engine failed: {}", e),
+                        }
+                    }
+
+                    // Android: start camera
+                    #[cfg(target_os = "android")]
+                    {
+                        let cam = camera::AndroidCamera::new(camera::CameraConfig::default());
+                        if let Err(e) = cam.start() {
+                            tracing::warn!("Camera failed to start: {}", e);
+                        } else {
+                            st.camera = Some(cam);
+                        }
+                    }
+
+                    // Start continuous recording + VAD
+                    start_continuous_listening(&mut st, &app);
                 }
                 Err(error) => {
                     let msg = slint::format!("初始化失败: {}", error);
@@ -82,7 +136,376 @@ pub fn setup_app(app: &AppWindow) {
         .unwrap();
     }
 
-    // Toggle recording
+    // VAD processing timer — checks for speech end every 100ms
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        let vad_timer = slint::Timer::default();
+        vad_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(100),
+            move || {
+                let state = state.clone();
+                let app_weak = app_weak.clone();
+                slint::spawn_local(async move {
+                    let mut st = state.lock().await;
+                    if !st.vad_active || st.recorder.is_none() {
+                        return;
+                    }
+
+                    // Get accumulated audio samples and feed to VAD
+                    let samples = if let Some(ref recorder) = st.recorder {
+                        recorder.take_samples()
+                    } else {
+                        return;
+                    };
+
+                    if samples.is_empty() {
+                        return;
+                    }
+
+                    let pcm = ale_core::vad::pcm16_bytes_to_f32(&samples);
+                    let mut speech_ended = false;
+                    for chunk in pcm.chunks(st.vad.config.frame_size) {
+                        if chunk.len() == st.vad.config.frame_size {
+                            let vad_state = st.vad.process_frame(chunk);
+                            if vad_state == VadState::SpeechEnded {
+                                speech_ended = true;
+                            }
+                        }
+                    }
+
+                    // Update UI vad state
+                    let app = app_weak.unwrap();
+                    match st.vad.state() {
+                        VadState::Speaking => app.set_vad_state("speaking".into()),
+                        VadState::SpeechEnded => app.set_vad_state("speech_ended".into()),
+                        VadState::Silent => app.set_vad_state("silent".into()),
+                    }
+
+                    if !speech_ended {
+                        return;
+                    }
+
+                    // Speech ended — stop recording and process
+                    let engine = st.engine.clone();
+                    let recorder = st.recorder.take();
+                    let auto_speak = st.auto_speak;
+                    st.recording_started = None;
+                    st.vad_active = false;
+                    app.set_is_recording(false);
+                    app.set_is_busy(true);
+                    app.set_status_text("正在处理...".into());
+                    app.set_status_type("processing".into());
+
+                    let Some(engine) = engine else {
+                        app.set_status_text("引擎尚未初始化".into());
+                        app.set_status_type("error".into());
+                        app.set_is_busy(false);
+                        return;
+                    };
+                    let Some(recorder) = recorder else {
+                        app.set_is_busy(false);
+                        return;
+                    };
+
+                    let audio = match recorder.into_wav_bytes() {
+                        Ok(a) => a,
+                        Err(e) => {
+                            app.set_status_text(slint::format!("录音失败: {}", e));
+                            app.set_status_type("error".into());
+                            app.set_is_busy(false);
+                            return;
+                        }
+                    };
+
+                    // Get image (screen or camera)
+                    let image_data: Option<Vec<u8>> = {
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            st.screen_capture
+                                .as_ref()
+                                .and_then(|sc| sc.latest_frame_jpeg())
+                        }
+                        #[cfg(target_os = "android")]
+                        {
+                            st.camera.as_ref().and_then(|cam| {
+                                cam.latest_frame().map(|f| {
+                                    image::RgbaImage::from_raw(f.width, f.height, f.rgba_data)
+                                        .map(|img| {
+                                            image::DynamicImage::ImageRgba8(img).to_rgb8().to_vec()
+                                        })
+                                        .unwrap_or_default()
+                                })
+                            })
+                        }
+                    };
+
+                    drop(st);
+
+                    // Transcribe audio
+                    let transcription = {
+                        let eng = engine.lock().await;
+                        eng.transcribe(&audio).await
+                    };
+
+                    let app = app_weak.unwrap();
+
+                    let question = match transcription {
+                        Ok(ref text) => {
+                            app.set_transcription(text.clone().into());
+                            text.clone()
+                        }
+                        Err(ref e) => {
+                            app.set_transcription(slint::format!("转写失败: {}", e));
+                            app.set_is_busy(false);
+                            app.set_status_text("就绪".into());
+                            app.set_status_type("ready".into());
+                            // Restart listening
+                            let mut st = state.lock().await;
+                            start_continuous_listening(&mut st, &app);
+                            return;
+                        }
+                    };
+
+                    // If we have an image, ask about it; otherwise just show transcription
+                    if let Some(img) = image_data {
+                        app.set_status_text("正在分析画面...".into());
+                        let result = {
+                            let eng = engine.lock().await;
+                            eng.ask_about_image(&img, &question).await
+                        };
+
+                        match result {
+                            Ok(response) => {
+                                app.set_ai_response(response.content.clone().into());
+
+                                // Parse tool calls into action plan
+                                if let Some(ref calls) = response.tool_calls {
+                                    if !calls.is_empty() {
+                                        let steps: Vec<String> = calls
+                                            .iter()
+                                            .map(|tc| {
+                                                format!(
+                                                    "{}: {}",
+                                                    tc.function.name, tc.function.arguments
+                                                )
+                                            })
+                                            .collect();
+                                        app.set_action_steps(steps.join("\n").into());
+                                    }
+                                }
+
+                                app.set_status_text("就绪".into());
+                                app.set_status_type("ready".into());
+
+                                if auto_speak {
+                                    let text = response.content.clone();
+                                    let engine = engine.clone();
+                                    let app_weak2 = app_weak.clone();
+                                    slint::spawn_local(async move {
+                                        let _ = speak_and_play(engine, &text).await;
+                                        let app = app_weak2.unwrap();
+                                        app.set_status_text("就绪".into());
+                                        app.set_status_type("ready".into());
+                                    })
+                                    .unwrap();
+                                }
+                            }
+                            Err(e) => {
+                                app.set_ai_response(slint::format!("分析失败: {}", e));
+                                app.set_status_text("就绪".into());
+                                app.set_status_type("ready".into());
+                            }
+                        }
+                    } else {
+                        // No image, just show transcription
+                        app.set_ai_response("".into());
+                        app.set_status_text("就绪".into());
+                        app.set_status_type("ready".into());
+
+                        if auto_speak && !question.is_empty() {
+                            let engine = engine.clone();
+                            let app_weak2 = app_weak.clone();
+                            slint::spawn_local(async move {
+                                let _ = speak_and_play(engine, &question).await;
+                                let app = app_weak2.unwrap();
+                                app.set_status_text("就绪".into());
+                                app.set_status_type("ready".into());
+                            })
+                            .unwrap();
+                        }
+                    }
+
+                    app.set_is_busy(false);
+
+                    // Restart listening
+                    let mut st = state.lock().await;
+                    start_continuous_listening(&mut st, &app);
+                })
+                .unwrap();
+            },
+        );
+    }
+
+    // Text submitted (desktop fallback input)
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_text_submitted(move |text| {
+            let question: String = text.into();
+            if question.is_empty() {
+                return;
+            }
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            slint::spawn_local(async move {
+                let st = state.lock().await;
+                let engine = st.engine.clone();
+                let auto_speak = st.auto_speak;
+                drop(st);
+
+                let Some(engine) = engine else { return };
+
+                let app = app_weak.unwrap();
+                app.set_transcription(question.clone().into());
+                app.set_is_busy(true);
+                app.set_status_text("正在分析...".into());
+                app.set_status_type("processing".into());
+
+                // Get screen image
+                #[cfg(not(target_os = "android"))]
+                let image_data = {
+                    let st = state.lock().await;
+                    st.screen_capture
+                        .as_ref()
+                        .and_then(|sc| sc.latest_frame_jpeg())
+                };
+                #[cfg(target_os = "android")]
+                let image_data: Option<Vec<u8>> = None;
+
+                drop(state.lock().await);
+
+                if let Some(img) = image_data {
+                    let result = {
+                        let eng = engine.lock().await;
+                        eng.ask_about_image(&img, &question).await
+                    };
+
+                    let app = app_weak.unwrap();
+                    match result {
+                        Ok(response) => {
+                            app.set_ai_response(response.content.clone().into());
+                            app.set_status_text("就绪".into());
+                            app.set_status_type("ready".into());
+
+                            if auto_speak {
+                                let engine = engine.clone();
+                                let app_weak2 = app_weak.clone();
+                                let text = response.content.clone();
+                                slint::spawn_local(async move {
+                                    let _ = speak_and_play(engine, &text).await;
+                                    let app = app_weak2.unwrap();
+                                    app.set_status_text("就绪".into());
+                                    app.set_status_type("ready".into());
+                                })
+                                .unwrap();
+                            }
+                        }
+                        Err(e) => {
+                            app.set_ai_response(slint::format!("失败: {}", e));
+                            app.set_status_text("就绪".into());
+                            app.set_status_type("ready".into());
+                        }
+                    }
+                }
+
+                let app = app_weak.unwrap();
+                app.set_is_busy(false);
+            })
+            .unwrap();
+        });
+    }
+
+    // Confirm action (desktop)
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_confirm_action(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            slint::spawn_local(async move {
+                let mut st = state.lock().await;
+                if let Some(plan) = st.pending_plan.take() {
+                    if let Some(ref mut ae) = st.automation {
+                        match ae.execute_plan(&plan) {
+                            Ok(result) => {
+                                let app = app_weak.unwrap();
+                                app.set_show_confirmation(false);
+                                app.set_status_text(slint::format!(
+                                    "执行完成: {} 步",
+                                    result.actions_executed
+                                ));
+                            }
+                            Err(e) => {
+                                let app = app_weak.unwrap();
+                                app.set_show_confirmation(false);
+                                app.set_status_text(slint::format!("执行失败: {}", e));
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+        });
+    }
+
+    // Cancel action
+    {
+        let app_weak = app_weak.clone();
+        app.on_cancel_action(move || {
+            let app = app_weak.unwrap();
+            app.set_show_confirmation(false);
+            app.set_confirmation_text("".into());
+        });
+    }
+
+    // Toggle monitoring (restart VAD listening)
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_toggle_monitoring(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            slint::spawn_local(async move {
+                let mut st = state.lock().await;
+                let app = app_weak.unwrap();
+                if st.vad_active {
+                    st.vad_active = false;
+                    st.recorder = None;
+                    st.recording_started = None;
+                    app.set_is_recording(false);
+                    app.set_vad_state("silent".into());
+                } else {
+                    start_continuous_listening(&mut st, &app);
+                }
+            })
+            .unwrap();
+        });
+    }
+
+    // Clear conversation
+    {
+        let app_weak = app_weak.clone();
+        app.on_clear_conversation(move || {
+            let app = app_weak.unwrap();
+            app.set_transcription("".into());
+            app.set_ai_response("".into());
+            app.set_action_steps("".into());
+        });
+    }
+
+    // Legacy callbacks (kept for mobile screen compatibility)
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -93,12 +516,13 @@ pub fn setup_app(app: &AppWindow) {
                 let mut st = state.lock().await;
                 let app = app_weak.unwrap();
 
-                // Start recording
                 if st.recorder.is_none() {
                     match audio::Recorder::start() {
                         Ok(recorder) => {
                             st.recorder = Some(recorder);
                             st.recording_started = Some(Instant::now());
+                            st.vad.reset();
+                            st.vad_active = true;
                             app.set_is_recording(true);
                             app.set_status_text("正在录音...".into());
                             app.set_status_type("recording".into());
@@ -106,88 +530,69 @@ pub fn setup_app(app: &AppWindow) {
                         Err(error) => {
                             app.set_status_text(slint::format!("{}", error));
                             app.set_status_type("error".into());
-                            st.diagnostics_errors.push(error);
-                            update_errors_display(&app, &st.diagnostics_errors);
                         }
                     }
-                    return;
-                }
+                } else {
+                    // Manual stop
+                    let engine = st.engine.clone();
+                    let recorder = st.recorder.take();
+                    let auto_speak = st.auto_speak;
+                    st.recording_started = None;
+                    st.vad_active = false;
+                    app.set_is_recording(false);
 
-                // Stop recording
-                let engine = st.engine.clone();
-                let recorder = st.recorder.take();
-                let auto_speak = st.auto_speak;
-                st.recording_started = None;
-                app.set_is_recording(false);
+                    let Some(engine) = engine else { return };
+                    let Some(recorder) = recorder else { return };
 
-                let Some(engine) = engine else {
-                    app.set_status_text("引擎尚未初始化".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
+                    let audio = match recorder.into_wav_bytes() {
+                        Ok(a) => a,
+                        Err(e) => {
+                            app.set_status_text(slint::format!("录音失败: {}", e));
+                            return;
+                        }
+                    };
 
-                let Some(recorder) = recorder else {
-                    app.set_status_text("录音状态丢失".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
+                    app.set_status_text("正在转写...".into());
+                    app.set_status_type("processing".into());
+                    app.set_is_busy(true);
+                    drop(st);
 
-                let audio = match recorder.into_wav_bytes() {
-                    Ok(audio) => audio,
-                    Err(error) => {
-                        app.set_status_text(slint::format!("录音保存失败: {}", error));
-                        app.set_status_type("error".into());
-                        return;
-                    }
-                };
+                    let result = transcribe_audio(engine.clone(), audio).await;
+                    let app = app_weak.unwrap();
 
-                app.set_status_text("正在转写语音...".into());
-                app.set_status_type("processing".into());
-                app.set_is_busy(true);
+                    match result {
+                        Ok(text) => {
+                            app.set_status_text("就绪".into());
+                            app.set_status_type("ready".into());
+                            app.set_result_title("语音识别结果".into());
+                            app.set_result_text(text.clone().into());
+                            app.set_has_result(true);
 
-                // Drop the lock before async work
-                drop(st);
-
-                let result = transcribe_audio(engine.clone(), audio).await;
-                let mut st = state.lock().await;
-                let app = app_weak.unwrap();
-
-                match result {
-                    Ok(text) => {
-                        app.set_status_text("就绪".into());
-                        app.set_status_type("ready".into());
-                        app.set_result_title("语音识别结果".into());
-                        app.set_result_text(text.clone().into());
-                        app.set_result_metadata("".into());
-                        app.set_has_result(true);
-
-                        if auto_speak {
-                            let speak_str = slint::format!("识别完成: {}", text);
-                            drop(st);
-                            let app_weak2 = app_weak.clone();
-                            slint::spawn_local(async move {
-                                let _ = speak_and_play(engine, speak_str.as_str()).await;
-                                let app = app_weak2.unwrap();
-                                app.set_status_text("就绪".into());
-                                app.set_status_type("ready".into());
-                            })
-                            .unwrap();
+                            if auto_speak {
+                                let engine = engine.clone();
+                                let app_weak2 = app_weak.clone();
+                                slint::spawn_local(async move {
+                                    let _ = speak_and_play(engine, &text).await;
+                                    let app = app_weak2.unwrap();
+                                    app.set_status_text("就绪".into());
+                                    app.set_status_type("ready".into());
+                                })
+                                .unwrap();
+                            }
+                        }
+                        Err(error) => {
+                            app.set_status_text(slint::format!("转写失败: {}", error));
+                            app.set_status_type("error".into());
                         }
                     }
-                    Err(error) => {
-                        app.set_status_text(slint::format!("语音识别失败: {}", error));
-                        app.set_status_type("error".into());
-                        st.diagnostics_errors.push(error);
-                        update_errors_display(&app, &st.diagnostics_errors);
-                    }
+                    app.set_is_busy(false);
                 }
-                app.set_is_busy(false);
             })
             .unwrap();
         });
     }
 
-    // Describe image
+    // Describe image (legacy, for mobile)
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -200,58 +605,34 @@ pub fn setup_app(app: &AppWindow) {
                 let auto_speak = st.auto_speak;
                 drop(st);
 
-                let Some(engine) = engine else {
-                    let app = app_weak.unwrap();
-                    app.set_status_text("引擎尚未初始化".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
-
+                let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
-                app.set_status_text("正在选择并描述图片...".into());
+                app.set_status_text("正在选择图片...".into());
                 app.set_status_type("processing".into());
                 app.set_is_busy(true);
 
                 let result = describe_image_inner().await;
 
-                let image_result = match result {
-                    Ok((bytes, file_name)) => {
-                        let metadata = format!("图片: {}，大小: {} bytes", file_name, bytes.len());
-                        let engine_guard = engine.lock().await;
-                        match ensure_api_key(engine_guard.config()) {
-                            Ok(()) => {
-                                let text = engine_guard
-                                    .describe_image(&bytes)
-                                    .await
-                                    .map_err(|e| e.to_string());
-                                Some((text, metadata))
-                            }
-                            Err(e) => Some((Err(e), String::new())),
-                        }
-                    }
-                    Err(e) => Some((Err(e), String::new())),
-                };
+                if let Ok((bytes, file_name)) = result {
+                    let metadata = format!("图片: {}", file_name);
+                    let eng = engine.lock().await;
+                    let text = eng.describe_image(&bytes).await;
 
-                let app = app_weak.unwrap();
-                let mut st = state.lock().await;
-
-                if let Some((text_result, metadata)) = image_result {
-                    match text_result {
-                        Ok(text) => {
+                    let app = app_weak.unwrap();
+                    match text {
+                        Ok(desc) => {
+                            app.set_result_title("图像描述".into());
+                            app.set_result_text(desc.clone().into());
+                            app.set_result_metadata(metadata.into());
+                            app.set_has_result(true);
                             app.set_status_text("就绪".into());
                             app.set_status_type("ready".into());
-                            app.set_result_title("图像描述结果".into());
-                            app.set_result_text(text.clone().into());
-                            app.set_result_metadata(slint::format!("{}", metadata));
-                            app.set_has_result(true);
-                            app.set_last_image_info(slint::format!("{}", metadata));
 
                             if auto_speak {
-                                let speak_str = slint::format!("图片描述完成: {}", text);
-                                drop(st);
+                                let engine = engine.clone();
                                 let app_weak2 = app_weak.clone();
                                 slint::spawn_local(async move {
-                                    let _ = speak_and_play(engine, speak_str.as_str()).await;
+                                    let _ = speak_and_play(engine, &desc).await;
                                     let app = app_weak2.unwrap();
                                     app.set_status_text("就绪".into());
                                     app.set_status_type("ready".into());
@@ -259,14 +640,13 @@ pub fn setup_app(app: &AppWindow) {
                                 .unwrap();
                             }
                         }
-                        Err(error) => {
-                            app.set_status_text(slint::format!("图片描述失败: {}", error));
+                        Err(e) => {
+                            app.set_status_text(slint::format!("描述失败: {}", e));
                             app.set_status_type("error".into());
-                            st.diagnostics_errors.push(error);
-                            update_errors_display(&app, &st.diagnostics_errors);
                         }
                     }
                 }
+                let app = app_weak.unwrap();
                 app.set_is_busy(false);
             })
             .unwrap();
@@ -285,38 +665,20 @@ pub fn setup_app(app: &AppWindow) {
                 let engine = st.engine.clone();
                 drop(st);
 
-                let Some(engine) = engine else {
-                    let app = app_weak.unwrap();
-                    app.set_status_text("引擎尚未初始化".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
-
+                let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
                 let result_text: String = app.get_result_text().into();
                 if result_text.is_empty() {
-                    app.set_status_text("没有可朗读的结果".into());
-                    app.set_status_type("error".into());
                     return;
                 }
 
-                app.set_status_text("正在朗读结果...".into());
-                app.set_status_type("processing".into());
+                app.set_status_text("正在朗读...".into());
                 app.set_is_busy(true);
 
-                let result = speak_and_play(engine, &result_text).await;
+                let _ = speak_and_play(engine, &result_text).await;
                 let app = app_weak.unwrap();
-
-                match result {
-                    Ok(()) => {
-                        app.set_status_text("就绪".into());
-                        app.set_status_type("ready".into());
-                    }
-                    Err(error) => {
-                        app.set_status_text(slint::format!("朗读失败: {}", error));
-                        app.set_status_type("error".into());
-                    }
-                }
+                app.set_status_text("就绪".into());
+                app.set_status_type("ready".into());
                 app.set_is_busy(false);
             })
             .unwrap();
@@ -359,18 +721,11 @@ pub fn setup_app(app: &AppWindow) {
                 let engine = st.engine.clone();
                 drop(st);
 
-                let Some(engine) = engine else {
-                    let app = app_weak.unwrap();
-                    app.set_status_text("引擎尚未初始化".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
-
+                let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
                 let config = config_from_app(&app);
 
-                app.set_status_text("正在保存设置...".into());
-                app.set_status_type("processing".into());
+                app.set_status_text("正在保存...".into());
                 app.set_is_busy(true);
 
                 let result = save_settings(engine, config).await;
@@ -408,16 +763,9 @@ pub fn setup_app(app: &AppWindow) {
                 let engine = st.engine.clone();
                 drop(st);
 
-                let Some(engine) = engine else {
-                    let app = app_weak.unwrap();
-                    app.set_status_text("引擎尚未初始化".into());
-                    app.set_status_type("error".into());
-                    return;
-                };
-
+                let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
-                app.set_status_text("正在测试云端连接...".into());
-                app.set_status_type("processing".into());
+                app.set_status_text("测试中...".into());
                 app.set_is_busy(true);
 
                 let result = test_connection(engine).await;
@@ -425,18 +773,15 @@ pub fn setup_app(app: &AppWindow) {
 
                 match result {
                     Ok(true) => {
-                        app.set_status_text("就绪".into());
+                        app.set_status_text("连接成功".into());
                         app.set_status_type("ready".into());
-                        app.set_result_title("连接测试结果".into());
-                        app.set_result_text("云端连接测试成功".into());
-                        app.set_has_result(true);
                     }
                     Ok(false) => {
-                        app.set_status_text("云端连接测试失败".into());
+                        app.set_status_text("连接失败".into());
                         app.set_status_type("error".into());
                     }
-                    Err(error) => {
-                        app.set_status_text(slint::format!("连接测试失败: {}", error));
+                    Err(e) => {
+                        app.set_status_text(slint::format!("测试失败: {}", e));
                         app.set_status_type("error".into());
                     }
                 }
@@ -508,34 +853,22 @@ pub fn setup_app(app: &AppWindow) {
             app.set_show_api_key(!app.get_show_api_key());
         });
     }
+}
 
-    // Recording timer
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_secs(1),
-            move || {
-                let state = state.clone();
-                let app_weak = app_weak.clone();
-                slint::spawn_local(async move {
-                    let st = state.lock().await;
-                    if let Some(started) = st.recording_started {
-                        let elapsed = started.elapsed().as_secs();
-                        let app = app_weak.unwrap();
-                        app.set_recording_seconds(elapsed as i32);
-
-                        if elapsed >= 60 && st.recorder.is_some() {
-                            drop(st);
-                            app.invoke_toggle_recording();
-                        }
-                    }
-                })
-                .unwrap();
-            },
-        );
+fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
+    match audio::Recorder::start() {
+        Ok(recorder) => {
+            st.recorder = Some(recorder);
+            st.recording_started = Some(Instant::now());
+            st.vad.reset();
+            st.vad_active = true;
+            app.set_is_recording(true);
+            app.set_vad_state("silent".into());
+        }
+        Err(e) => {
+            app.set_status_text(slint::format!("麦克风启动失败: {}", e));
+            app.set_status_type("error".into());
+        }
     }
 }
 
@@ -631,12 +964,12 @@ async fn speak_and_play(engine: Arc<Mutex<AleEngine>>, text: &str) -> Result<(),
 
     tokio::task::spawn_blocking(move || tts_player::play_audio(&audio))
         .await
-        .map_err(|error| format!("音频播放任务失败: {error}"))?
+        .map_err(|error| format!("播放失败: {error}"))?
 }
 
 fn ensure_api_key(config: &AppConfig) -> Result<(), String> {
     if config.cloud_api.api_key.trim().is_empty() {
-        return Err("API key 未配置，请先打开设置填写".to_string());
+        return Err("API key 未配置".to_string());
     }
     Ok(())
 }

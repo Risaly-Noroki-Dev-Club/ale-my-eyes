@@ -62,6 +62,20 @@ impl Recorder {
         Ok(cursor.into_inner())
     }
 
+    /// Drain accumulated samples and return as i16 PCM bytes (for VAD processing)
+    pub fn take_samples(&self) -> Vec<u8> {
+        let Ok(mut buffer) = self.samples.lock() else {
+            return Vec::new();
+        };
+        let samples: Vec<f32> = buffer.drain(..).collect();
+        let mut pcm = Vec::with_capacity(samples.len() * 2);
+        for s in samples {
+            let i = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+            pcm.extend_from_slice(&i.to_le_bytes());
+        }
+        pcm
+    }
+
     #[cfg(not(target_os = "android"))]
     fn start_desktop() -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

@@ -40,7 +40,7 @@ impl Default for VadConfig {
 
 /// 语音活动检测器（基于能量的简易实现）
 pub struct VoiceActivityDetector {
-    config: VadConfig,
+    pub config: VadConfig,
     state: VadState,
     speech_frame_count: usize,
     silence_frame_count: usize,
