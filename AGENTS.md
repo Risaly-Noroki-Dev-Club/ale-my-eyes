@@ -18,7 +18,7 @@
 - `cargo check --workspace` is expected to pass as of this file's latest update.
 - `ale-gui` uses Slint `1.16` for cross-platform UI (desktop + Android). The `.slint` UI files are in `ale-gui/ui/` and compiled by `slint-build` in `build.rs`.
 - `ale-gui` records audio through `cpal` on desktop and `oboe` on Android; Linux checks/builds need `libasound2-dev` and `libfontconfig-dev` installed.
-- `ale-gui` desktop also uses `xcap` (screen capture) and `enigo` (keyboard/mouse automation); Linux builds additionally need `libpipewire-0.3-dev`, `libwayland-dev`, `libxrandr-dev`, `libdbus-1-dev`, and `libegl-dev`.
+- `ale-gui` desktop also uses `xcap` (screen capture) and `enigo` (keyboard/mouse automation); Linux builds additionally need `libpipewire-0.3-dev`, `libwayland-dev`, `libxrandr-dev`, `libdbus-1-dev`, `libegl-dev`, `libgbm-dev`, `libxcb-shape0-dev`, and `libxcb-xfixes0-dev`.
 - `ale-gui` is a `cdylib` for Android builds via `cargo-apk`, and a regular binary for desktop.
 
 ## Architecture Notes

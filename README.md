@@ -165,7 +165,7 @@ ale-my-eyes-rust/
 
 - **Rust**: 1.70.0+
 - **系统依赖**:
-  - Linux: `libasound2-dev libfontconfig-dev libspeechd-dev libpipewire-0.3-dev libwayland-dev libxrandr-dev libdbus-1-dev libegl-dev libclang-dev`
+  - Linux: `libasound2-dev libfontconfig-dev libspeechd-dev libpipewire-0.3-dev libwayland-dev libxrandr-dev libdbus-1-dev libegl-dev libgbm-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev`
   - Windows: Visual Studio Build Tools
   - Android: Android NDK 25+, `cargo-apk`
 
