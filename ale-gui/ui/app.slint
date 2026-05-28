@@ -1,201 +1,96 @@
-import { ScrollView, VerticalBox } from "std-widgets.slint";
-import { MainScreen } from "main-screen.slint";
-import { SettingsScreen } from "settings-screen.slint";
-import { DiagnosticsScreen } from "diagnostics-screen.slint";
-import { DesktopScreen } from "desktop-screen.slint";
-import { NavButton, Theme } from "widgets.slint";
+import { CompactScreen } from "compact.slint";
+import { SettingsPopup } from "settings-popup.slint";
+import { AppTheme } from "widgets.slint";
+import { Palette } from "std-widgets.slint";
 
-export { Theme }
+export { AppTheme }
 
 export component AppWindow inherits Window {
     title: "Ale, My Eyes!";
-    preferred-width: 420px;
-    preferred-height: 800px;
-    background: Theme.colors.bg;
+    preferred-width: 360px;
+    preferred-height: 190px;
+    background: Palette.background;
 
-
-    in-out property <int> current-screen: 0;
-
-    // Main screen properties
-    in-out property <string> status-text: "正在初始化...";
+    in-out property <string> status-text: "初始化中...";
     in-out property <string> status-type: "info";
-    in-out property <bool> is-recording: false;
-    in-out property <bool> is-busy: false;
-    in-out property <bool> engine-ready: false;
-    in-out property <int> recording-seconds: 0;
-    in-out property <string> result-title: "";
-    in-out property <string> result-text: "";
-    in-out property <string> result-metadata: "";
-    in-out property <bool> has-result: false;
-    in-out property <string> last-image-info: "";
-    in-out property <bool> auto-speak: true;
-
-    // Settings screen properties
-    in-out property <string> provider: "";
-    in-out property <string> api-key: "";
-    in-out property <string> api-url: "";
-    in-out property <string> model: "";
-    in-out property <string> language: "";
-    in-out property <string> font-size-str: "";
-    in-out property <bool> high-contrast: false;
-    in-out property <bool> show-api-key: false;
-
-    // Diagnostics screen properties
-    in-out property <string> engine-status: "未初始化";
-    in-out property <string> recent-errors: "";
-
-    // Desktop screen properties
     in-out property <string> vad-state: "silent";
     in-out property <string> transcription: "";
     in-out property <string> ai-response: "";
     in-out property <string> action-steps: "";
     in-out property <bool> show-confirmation: false;
     in-out property <string> confirmation-text: "";
-    in-out property <string> screen-context: "";
+    in-out property <bool> is-busy: false;
+    in-out property <bool> engine-ready: false;
+    in-out property <int> session-tokens: 0;
+    in-out property <int> max-tokens-budget: 4000;
     in-out property <string> text-input: "";
 
-    // Callbacks
-    callback toggle-recording();
-    callback describe-image();
-    callback speak-result();
-    callback clear-result();
-    callback clear-error();
-    callback save-settings();
-    callback test-connection();
+    in-out property <bool> show-settings: false;
+    in-out property <string> provider: "";
+    in-out property <string> api-key: "";
+    in-out property <string> api-url: "";
+    in-out property <string> model: "";
+    in-out property <string> max-tokens-str: "4000";
+    in-out property <bool> auto-speak: true;
+    in-out property <bool> show-api-key: false;
+    in-out property <string> config-path: "";
+
+    callback text-submitted(string);
+    callback confirm-action();
+    callback cancel-action();
+    callback open-settings();
+    callback close-settings();
     callback provider-changed(string);
     callback api-key-changed(string);
     callback api-url-changed(string);
     callback model-changed(string);
-    callback language-changed(string);
-    callback font-size-changed(string);
-    callback high-contrast-changed(bool);
+    callback max-tokens-changed(string);
     callback auto-speak-changed(bool);
     callback toggle-api-key-visible();
-    callback text-submitted(string);
-    callback confirm-action();
-    callback cancel-action();
-    callback toggle-monitoring();
-    callback clear-conversation();
+    callback save-settings();
+    callback test-connection();
 
-    VerticalLayout {
-        // Screen content
-        Rectangle {
-            vertical-stretch: 1;
+    CompactScreen {
+        status-text: root.status-text;
+        status-type: root.status-type;
+        vad-state: root.vad-state;
+        transcription: root.transcription;
+        ai-response: root.ai-response;
+        action-steps: root.action-steps;
+        show-confirmation: root.show-confirmation;
+        confirmation-text: root.confirmation-text;
+        is-busy: root.is-busy;
+        engine-ready: root.engine-ready;
+        session-tokens: root.session-tokens;
+        max-tokens-budget: root.max-tokens-budget;
+        text-input: root.text-input;
 
-            if root.current-screen == 0: MainScreen {
-                status-text: root.status-text;
-                status-type: root.status-type;
-                is-recording: root.is-recording;
-                is-busy: root.is-busy;
-                engine-ready: root.engine-ready;
-                recording-seconds: root.recording-seconds;
-                result-title: root.result-title;
-                result-text: root.result-text;
-                result-metadata: root.result-metadata;
-                has-result: root.has-result;
-                last-image-info: root.last-image-info;
-                auto-speak: root.auto-speak;
+        text-submitted(text) => { root.text-submitted(text); }
+        confirm-action => { root.confirm-action(); }
+        cancel-action => { root.cancel-action(); }
+        open-settings => { root.open-settings(); }
+    }
 
-                toggle-recording => { root.toggle-recording(); }
-                describe-image => { root.describe-image(); }
-                speak-result => { root.speak-result(); }
-                clear-result => { root.clear-result(); }
-                clear-error => { root.clear-error(); }
-                show-settings => { root.current-screen = 1; }
-                show-diagnostics => { root.current-screen = 2; }
-            }
+    if root.show-settings: SettingsPopup {
+        provider: root.provider;
+        api-key: root.api-key;
+        api-url: root.api-url;
+        model: root.model;
+        max-tokens-str: root.max-tokens-str;
+        auto-speak: root.auto-speak;
+        show-api-key: root.show-api-key;
+        is-busy: root.is-busy;
+        config-path: root.config-path;
 
-            if root.current-screen == 1: SettingsScreen {
-                provider: root.provider;
-                api-key: root.api-key;
-                api-url: root.api-url;
-                model: root.model;
-                language: root.language;
-                font-size: root.font-size-str;
-                high-contrast: root.high-contrast;
-                auto-speak: root.auto-speak;
-                show-api-key: root.show-api-key;
-                is-busy: root.is-busy;
-
-                provider-changed(text) => { root.provider-changed(text); }
-                api-key-changed(text) => { root.api-key-changed(text); }
-                api-url-changed(text) => { root.api-url-changed(text); }
-                model-changed(text) => { root.model-changed(text); }
-                language-changed(text) => { root.language-changed(text); }
-                font-size-changed(text) => { root.font-size-changed(text); }
-                high-contrast-changed(val) => { root.high-contrast-changed(val); }
-                auto-speak-changed(val) => { root.auto-speak-changed(val); }
-                toggle-api-key-visible => { root.toggle-api-key-visible(); }
-                save-settings => { root.save-settings(); }
-                test-connection => { root.test-connection(); }
-                go-back => { root.current-screen = 0; }
-            }
-
-            if root.current-screen == 2: DiagnosticsScreen {
-                engine-status: root.engine-status;
-                api-url: root.api-url;
-                model: root.model;
-                auto-speak: root.auto_speak;
-                high-contrast: root.high-contrast;
-                recent-errors: root.recent-errors;
-
-                go-back => { root.current-screen = 0; }
-            }
-
-            if root.current-screen == 3: DesktopScreen {
-                vad-state: root.vad-state;
-                transcription: root.transcription;
-                ai-response: root.ai-response;
-                action-steps: root.action-steps;
-                status-text: root.status-text;
-                status-type: root.status-type;
-                is-busy: root.is-busy;
-                engine-ready: root.engine-ready;
-                show-confirmation: root.show-confirmation;
-                confirmation-text: root.confirmation-text;
-                screen-context: root.screen-context;
-                text-input: root.text-input;
-
-                text-submitted(text) => { root.text-submitted(text); }
-                confirm-action => { root.confirm-action(); }
-                cancel-action => { root.cancel-action(); }
-                toggle-monitoring => { root.toggle-monitoring(); }
-                clear-conversation => { root.clear-conversation(); }
-            }
-        }
-
-        // Bottom navigation bar
-        Rectangle {
-            height: 72px;
-            background: Theme.colors.card;
-            border-width: 1px;
-            border-color: Theme.colors.border;
-
-            HorizontalLayout {
-                padding: 4px;
-                spacing: 4px;
-
-                NavButton {
-                    icon: "🏠";
-                    label: "主页";
-                    active: root.current-screen == 0;
-                    clicked => { root.current-screen = 0; }
-                }
-
-                NavButton {
-                    icon: "⚙️";
-                    label: "设置";
-                    active: root.current-screen == 1;
-                    clicked => { root.current-screen = 1; }
-                }
-
-                NavButton {
-                    icon: "🔍";
-                    label: "诊断";
-                    active: root.current-screen == 2;
-                    clicked => { root.current-screen = 2; }
-                }
-            }
-        }
+        provider-changed(text) => { root.provider-changed(text); }
+        api-key-changed(text) => { root.api-key-changed(text); }
+        api-url-changed(text) => { root.api-url-changed(text); }
+        model-changed(text) => { root.model-changed(text); }
+        max-tokens-changed(text) => { root.max-tokens-changed(text); }
+        auto-speak-changed(val) => { root.auto-speak-changed(val); }
+        toggle-api-key-visible => { root.toggle-api-key-visible(); }
+        save-settings => { root.save-settings(); }
+        test-connection => { root.test-connection(); }
+        close-settings => { root.close-settings(); }
     }
 }

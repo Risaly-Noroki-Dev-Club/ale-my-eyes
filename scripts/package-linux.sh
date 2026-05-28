@@ -86,7 +86,8 @@ cat > "${PACKAGE_DIR}/config/config.json" << EOF
     "theme": "system",
     "font_size": 16,
     "high_contrast": false,
-    "screen_reader": true
+    "screen_reader": true,
+    "auto_speak": true
   }
 }
 EOF
@@ -141,10 +142,11 @@ cat > "${PACKAGE_DIR}/README.md" << EOF
 
 ## 功能特性
 
-- 语音交互：持续监听，VAD 自动检测说话结束
-- 视觉问答：对摄像头或屏幕提问，AI 自然语言回答
+- 语音交互：启动即监听，VAD 自动检测说话结束并处理
+- 视觉问答：对屏幕提问，AI 结合画面自然语言回答
 - 桌面自动化：语音控制键鼠操作
 - 多语言识别：支持 17 种语言
+- 平台原生样式：Windows Fluent / Android Material 3
 
 ## HTTP API 服务器
 

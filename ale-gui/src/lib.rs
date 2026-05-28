@@ -26,7 +26,6 @@ pub struct AppState {
     recorder: Option<audio::Recorder>,
     recording_started: Option<Instant>,
     auto_speak: bool,
-    diagnostics_errors: Vec<String>,
     vad: VoiceActivityDetector,
     vad_active: bool,
     #[cfg(not(target_os = "android"))]
@@ -51,7 +50,6 @@ impl AppState {
             recorder: None,
             recording_started: None,
             auto_speak: true,
-            diagnostics_errors: Vec::new(),
             vad: VoiceActivityDetector::with_default_config(),
             vad_active: false,
             #[cfg(not(target_os = "android"))]
@@ -80,14 +78,17 @@ pub fn setup_app(app: &AppWindow) {
 
             match result {
                 Ok((engine, config)) => {
-                    st.engine = Some(engine);
                     apply_config_to_app(&app, &config);
+                    let config_path = ale_core::config::ConfigFactory::create_default()
+                        .config_path()
+                        .to_string_lossy()
+                        .to_string();
+                    app.set_config_path(config_path.into());
+
+                    st.engine = Some(engine);
                     app.set_engine_ready(true);
-                    app.set_engine_status("已初始化".into());
                     app.set_status_text("就绪".into());
                     app.set_status_type("ready".into());
-                    app.set_api_url(config.cloud_api.api_url.into());
-                    app.set_model(config.cloud_api.model.into());
 
                     // Desktop: start screen capture + automation
                     #[cfg(not(target_os = "android"))]
@@ -120,23 +121,19 @@ pub fn setup_app(app: &AppWindow) {
                         }
                     }
 
-                    // Start continuous recording + VAD
+                    // Auto-start continuous listening
                     start_continuous_listening(&mut st, &app);
                 }
                 Err(error) => {
-                    let msg = slint::format!("初始化失败: {}", error);
-                    app.set_status_text(msg);
+                    app.set_status_text(slint::format!("初始化失败: {}", error));
                     app.set_status_type("error".into());
-                    app.set_engine_status("初始化失败".into());
-                    st.diagnostics_errors.push(error.clone());
-                    update_errors_display(&app, &st.diagnostics_errors);
                 }
             }
         })
         .unwrap();
     }
 
-    // VAD processing timer — checks for speech end every 100ms
+    // VAD timer — checks for speech end every 100ms
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -153,7 +150,6 @@ pub fn setup_app(app: &AppWindow) {
                         return;
                     }
 
-                    // Get accumulated audio samples and feed to VAD
                     let samples = if let Some(ref recorder) = st.recorder {
                         recorder.take_samples()
                     } else {
@@ -175,7 +171,6 @@ pub fn setup_app(app: &AppWindow) {
                         }
                     }
 
-                    // Update UI vad state
                     let app = app_weak.unwrap();
                     match st.vad.state() {
                         VadState::Speaking => app.set_vad_state("speaking".into()),
@@ -193,13 +188,12 @@ pub fn setup_app(app: &AppWindow) {
                     let auto_speak = st.auto_speak;
                     st.recording_started = None;
                     st.vad_active = false;
-                    app.set_is_recording(false);
                     app.set_is_busy(true);
-                    app.set_status_text("正在处理...".into());
+                    app.set_status_text("处理中...".into());
                     app.set_status_type("processing".into());
 
                     let Some(engine) = engine else {
-                        app.set_status_text("引擎尚未初始化".into());
+                        app.set_status_text("引擎未初始化".into());
                         app.set_status_type("error".into());
                         app.set_is_busy(false);
                         return;
@@ -261,16 +255,15 @@ pub fn setup_app(app: &AppWindow) {
                             app.set_is_busy(false);
                             app.set_status_text("就绪".into());
                             app.set_status_type("ready".into());
-                            // Restart listening
                             let mut st = state.lock().await;
                             start_continuous_listening(&mut st, &app);
                             return;
                         }
                     };
 
-                    // If we have an image, ask about it; otherwise just show transcription
+                    // If we have an image, ask about it
                     if let Some(img) = image_data {
-                        app.set_status_text("正在分析画面...".into());
+                        app.set_status_text("分析画面...".into());
                         let result = {
                             let eng = engine.lock().await;
                             eng.ask_about_image(&img, &question).await
@@ -280,7 +273,15 @@ pub fn setup_app(app: &AppWindow) {
                             Ok(response) => {
                                 app.set_ai_response(response.content.clone().into());
 
-                                // Parse tool calls into action plan
+                                // Track tokens
+                                {
+                                    let mut eng = engine.lock().await;
+                                    let ctx = eng.context_mut();
+                                    ctx.add_tokens(response.tokens_used);
+                                    app.set_session_tokens(ctx.session_tokens() as i32);
+                                }
+
+                                // Parse tool calls
                                 if let Some(ref calls) = response.tool_calls {
                                     if !calls.is_empty() {
                                         let steps: Vec<String> = calls
@@ -319,7 +320,6 @@ pub fn setup_app(app: &AppWindow) {
                             }
                         }
                     } else {
-                        // No image, just show transcription
                         app.set_ai_response("".into());
                         app.set_status_text("就绪".into());
                         app.set_status_type("ready".into());
@@ -348,7 +348,7 @@ pub fn setup_app(app: &AppWindow) {
         );
     }
 
-    // Text submitted (desktop fallback input)
+    // Text submitted
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -370,7 +370,7 @@ pub fn setup_app(app: &AppWindow) {
                 let app = app_weak.unwrap();
                 app.set_transcription(question.clone().into());
                 app.set_is_busy(true);
-                app.set_status_text("正在分析...".into());
+                app.set_status_text("分析中...".into());
                 app.set_status_type("processing".into());
 
                 // Get screen image
@@ -396,6 +396,15 @@ pub fn setup_app(app: &AppWindow) {
                     match result {
                         Ok(response) => {
                             app.set_ai_response(response.content.clone().into());
+
+                            // Track tokens
+                            {
+                                let mut eng = engine.lock().await;
+                                let ctx = eng.context_mut();
+                                ctx.add_tokens(response.tokens_used);
+                                app.set_session_tokens(ctx.session_tokens() as i32);
+                            }
+
                             app.set_status_text("就绪".into());
                             app.set_status_type("ready".into());
 
@@ -427,7 +436,7 @@ pub fn setup_app(app: &AppWindow) {
         });
     }
 
-    // Confirm action (desktop)
+    // Confirm action
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
@@ -470,324 +479,31 @@ pub fn setup_app(app: &AppWindow) {
         });
     }
 
-    // Toggle monitoring (restart VAD listening)
+    // Open settings
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
-        app.on_toggle_monitoring(move || {
-            let state = state.clone();
-            let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
-                let mut st = state.lock().await;
-                let app = app_weak.unwrap();
-                if st.vad_active {
-                    st.vad_active = false;
-                    st.recorder = None;
-                    st.recording_started = None;
-                    app.set_is_recording(false);
-                    app.set_vad_state("silent".into());
-                } else {
-                    start_continuous_listening(&mut st, &app);
-                }
-            })
-            .unwrap();
-        });
-    }
-
-    // Clear conversation
-    {
-        let app_weak = app_weak.clone();
-        app.on_clear_conversation(move || {
-            let app = app_weak.unwrap();
-            app.set_transcription("".into());
-            app.set_ai_response("".into());
-            app.set_action_steps("".into());
-        });
-    }
-
-    // Legacy callbacks (kept for mobile screen compatibility)
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        app.on_toggle_recording(move || {
-            let state = state.clone();
-            let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
-                let mut st = state.lock().await;
-                let app = app_weak.unwrap();
-
-                if st.recorder.is_none() {
-                    match audio::Recorder::start() {
-                        Ok(recorder) => {
-                            st.recorder = Some(recorder);
-                            st.recording_started = Some(Instant::now());
-                            st.vad.reset();
-                            st.vad_active = true;
-                            app.set_is_recording(true);
-                            app.set_status_text("正在录音...".into());
-                            app.set_status_type("recording".into());
-                        }
-                        Err(error) => {
-                            app.set_status_text(slint::format!("{}", error));
-                            app.set_status_type("error".into());
-                        }
-                    }
-                } else {
-                    // Manual stop
-                    let engine = st.engine.clone();
-                    let recorder = st.recorder.take();
-                    let auto_speak = st.auto_speak;
-                    st.recording_started = None;
-                    st.vad_active = false;
-                    app.set_is_recording(false);
-
-                    let Some(engine) = engine else { return };
-                    let Some(recorder) = recorder else { return };
-
-                    let audio = match recorder.into_wav_bytes() {
-                        Ok(a) => a,
-                        Err(e) => {
-                            app.set_status_text(slint::format!("录音失败: {}", e));
-                            return;
-                        }
-                    };
-
-                    app.set_status_text("正在转写...".into());
-                    app.set_status_type("processing".into());
-                    app.set_is_busy(true);
-                    drop(st);
-
-                    let result = transcribe_audio(engine.clone(), audio).await;
-                    let app = app_weak.unwrap();
-
-                    match result {
-                        Ok(text) => {
-                            app.set_status_text("就绪".into());
-                            app.set_status_type("ready".into());
-                            app.set_result_title("语音识别结果".into());
-                            app.set_result_text(text.clone().into());
-                            app.set_has_result(true);
-
-                            if auto_speak {
-                                let engine = engine.clone();
-                                let app_weak2 = app_weak.clone();
-                                slint::spawn_local(async move {
-                                    let _ = speak_and_play(engine, &text).await;
-                                    let app = app_weak2.unwrap();
-                                    app.set_status_text("就绪".into());
-                                    app.set_status_type("ready".into());
-                                })
-                                .unwrap();
-                            }
-                        }
-                        Err(error) => {
-                            app.set_status_text(slint::format!("转写失败: {}", error));
-                            app.set_status_type("error".into());
-                        }
-                    }
-                    app.set_is_busy(false);
-                }
-            })
-            .unwrap();
-        });
-    }
-
-    // Describe image (legacy, for mobile)
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        app.on_describe_image(move || {
+        app.on_open_settings(move || {
             let state = state.clone();
             let app_weak = app_weak.clone();
             slint::spawn_local(async move {
                 let st = state.lock().await;
-                let engine = st.engine.clone();
-                let auto_speak = st.auto_speak;
-                drop(st);
-
-                let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
-                app.set_status_text("正在选择图片...".into());
-                app.set_status_type("processing".into());
-                app.set_is_busy(true);
-
-                let result = describe_image_inner().await;
-
-                if let Ok((bytes, file_name)) = result {
-                    let metadata = format!("图片: {}", file_name);
+                if let Some(ref engine) = st.engine {
                     let eng = engine.lock().await;
-                    let text = eng.describe_image(&bytes).await;
-
-                    let app = app_weak.unwrap();
-                    match text {
-                        Ok(desc) => {
-                            app.set_result_title("图像描述".into());
-                            app.set_result_text(desc.clone().into());
-                            app.set_result_metadata(metadata.into());
-                            app.set_has_result(true);
-                            app.set_status_text("就绪".into());
-                            app.set_status_type("ready".into());
-
-                            if auto_speak {
-                                let engine = engine.clone();
-                                let app_weak2 = app_weak.clone();
-                                slint::spawn_local(async move {
-                                    let _ = speak_and_play(engine, &desc).await;
-                                    let app = app_weak2.unwrap();
-                                    app.set_status_text("就绪".into());
-                                    app.set_status_type("ready".into());
-                                })
-                                .unwrap();
-                            }
-                        }
-                        Err(e) => {
-                            app.set_status_text(slint::format!("描述失败: {}", e));
-                            app.set_status_type("error".into());
-                        }
-                    }
+                    apply_config_to_app(&app, eng.config());
                 }
-                let app = app_weak.unwrap();
-                app.set_is_busy(false);
+                app.set_show_settings(true);
             })
             .unwrap();
         });
     }
 
-    // Speak result
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        app.on_speak_result(move || {
-            let state = state.clone();
-            let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
-                let st = state.lock().await;
-                let engine = st.engine.clone();
-                drop(st);
-
-                let Some(engine) = engine else { return };
-                let app = app_weak.unwrap();
-                let result_text: String = app.get_result_text().into();
-                if result_text.is_empty() {
-                    return;
-                }
-
-                app.set_status_text("正在朗读...".into());
-                app.set_is_busy(true);
-
-                let _ = speak_and_play(engine, &result_text).await;
-                let app = app_weak.unwrap();
-                app.set_status_text("就绪".into());
-                app.set_status_type("ready".into());
-                app.set_is_busy(false);
-            })
-            .unwrap();
-        });
-    }
-
-    // Clear result
+    // Close settings
     {
         let app_weak = app_weak.clone();
-        app.on_clear_result(move || {
-            let app = app_weak.unwrap();
-            app.set_has_result(false);
-            app.set_result_text("".into());
-            app.set_result_title("".into());
-            app.set_result_metadata("".into());
-        });
-    }
-
-    // Clear error
-    {
-        let app_weak = app_weak.clone();
-        app.on_clear_error(move || {
-            let app = app_weak.unwrap();
-            if app.get_status_type().as_str() == "error" {
-                app.set_status_text("就绪".into());
-                app.set_status_type("ready".into());
-            }
-        });
-    }
-
-    // Save settings
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        app.on_save_settings(move || {
-            let state = state.clone();
-            let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
-                let st = state.lock().await;
-                let engine = st.engine.clone();
-                drop(st);
-
-                let Some(engine) = engine else { return };
-                let app = app_weak.unwrap();
-                let config = config_from_app(&app);
-
-                app.set_status_text("正在保存...".into());
-                app.set_is_busy(true);
-
-                let result = save_settings(engine, config).await;
-                let mut st = state.lock().await;
-                let app = app_weak.unwrap();
-
-                match result {
-                    Ok((new_engine, new_config)) => {
-                        st.engine = Some(new_engine);
-                        apply_config_to_app(&app, &new_config);
-                        app.set_status_text("就绪".into());
-                        app.set_status_type("ready".into());
-                        app.set_current_screen(0);
-                    }
-                    Err(error) => {
-                        app.set_status_text(slint::format!("保存失败: {}", error));
-                        app.set_status_type("error".into());
-                    }
-                }
-                app.set_is_busy(false);
-            })
-            .unwrap();
-        });
-    }
-
-    // Test connection
-    {
-        let state = state.clone();
-        let app_weak = app_weak.clone();
-        app.on_test_connection(move || {
-            let state = state.clone();
-            let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
-                let st = state.lock().await;
-                let engine = st.engine.clone();
-                drop(st);
-
-                let Some(engine) = engine else { return };
-                let app = app_weak.unwrap();
-                app.set_status_text("测试中...".into());
-                app.set_is_busy(true);
-
-                let result = test_connection(engine).await;
-                let app = app_weak.unwrap();
-
-                match result {
-                    Ok(true) => {
-                        app.set_status_text("连接成功".into());
-                        app.set_status_type("ready".into());
-                    }
-                    Ok(false) => {
-                        app.set_status_text("连接失败".into());
-                        app.set_status_type("error".into());
-                    }
-                    Err(e) => {
-                        app.set_status_text(slint::format!("测试失败: {}", e));
-                        app.set_status_type("error".into());
-                    }
-                }
-                app.set_is_busy(false);
-            })
-            .unwrap();
+        app.on_close_settings(move || {
+            app_weak.unwrap().set_show_settings(false);
         });
     }
 
@@ -818,20 +534,8 @@ pub fn setup_app(app: &AppWindow) {
     }
     {
         let app_weak = app_weak.clone();
-        app.on_language_changed(move |text| {
-            app_weak.unwrap().set_language(text);
-        });
-    }
-    {
-        let app_weak = app_weak.clone();
-        app.on_font_size_changed(move |text| {
-            app_weak.unwrap().set_font_size_str(text);
-        });
-    }
-    {
-        let app_weak = app_weak.clone();
-        app.on_high_contrast_changed(move |value| {
-            app_weak.unwrap().set_high_contrast(value);
+        app.on_max_tokens_changed(move |text| {
+            app_weak.unwrap().set_max_tokens_str(text);
         });
     }
     {
@@ -853,6 +557,86 @@ pub fn setup_app(app: &AppWindow) {
             app.set_show_api_key(!app.get_show_api_key());
         });
     }
+
+    // Save settings
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_save_settings(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            slint::spawn_local(async move {
+                let st = state.lock().await;
+                let engine = st.engine.clone();
+                drop(st);
+
+                let Some(engine) = engine else { return };
+                let app = app_weak.unwrap();
+                let config = config_from_app(&app);
+
+                app.set_is_busy(true);
+
+                let result = save_settings(engine, config).await;
+                let mut st = state.lock().await;
+                let app = app_weak.unwrap();
+
+                match result {
+                    Ok((new_engine, new_config)) => {
+                        st.engine = Some(new_engine);
+                        apply_config_to_app(&app, &new_config);
+                        app.set_status_text("就绪".into());
+                        app.set_status_type("ready".into());
+                        app.set_show_settings(false);
+                    }
+                    Err(error) => {
+                        app.set_status_text(slint::format!("保存失败: {}", error));
+                        app.set_status_type("error".into());
+                    }
+                }
+                app.set_is_busy(false);
+            })
+            .unwrap();
+        });
+    }
+
+    // Test connection
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_test_connection(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            slint::spawn_local(async move {
+                let st = state.lock().await;
+                let engine = st.engine.clone();
+                drop(st);
+
+                let Some(engine) = engine else { return };
+                let app = app_weak.unwrap();
+                app.set_is_busy(true);
+
+                let result = test_connection(engine).await;
+                let app = app_weak.unwrap();
+
+                match result {
+                    Ok(true) => {
+                        app.set_status_text("连接成功".into());
+                        app.set_status_type("ready".into());
+                    }
+                    Ok(false) => {
+                        app.set_status_text("连接失败".into());
+                        app.set_status_type("error".into());
+                    }
+                    Err(e) => {
+                        app.set_status_text(slint::format!("测试失败: {}", e));
+                        app.set_status_type("error".into());
+                    }
+                }
+                app.set_is_busy(false);
+            })
+            .unwrap();
+        });
+    }
 }
 
 fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
@@ -862,7 +646,6 @@ fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
             st.recording_started = Some(Instant::now());
             st.vad.reset();
             st.vad_active = true;
-            app.set_is_recording(true);
             app.set_vad_state("silent".into());
         }
         Err(e) => {
@@ -877,9 +660,8 @@ fn apply_config_to_app(app: &AppWindow, config: &AppConfig) {
     app.set_api_key(config.cloud_api.api_key.clone().into());
     app.set_api_url(config.cloud_api.api_url.clone().into());
     app.set_model(config.cloud_api.model.clone().into());
-    app.set_language(config.ui.language.clone().into());
-    app.set_font_size_str(config.ui.font_size.to_string().into());
-    app.set_high_contrast(config.ui.high_contrast);
+    app.set_max_tokens_str(config.cloud_api.max_tokens.to_string().into());
+    app.set_auto_speak(config.ui.auto_speak);
 }
 
 fn config_from_app(app: &AppWindow) -> AppConfig {
@@ -892,21 +674,11 @@ fn config_from_app(app: &AppWindow) -> AppConfig {
         .trim_end_matches('/')
         .to_string();
     config.cloud_api.model = app.get_model().to_string();
-    config.ui.language = app.get_language().to_string();
-    if let Ok(size) = app.get_font_size_str().to_string().parse::<u32>() {
-        config.ui.font_size = size;
+    if let Ok(budget) = app.get_max_tokens_str().to_string().parse::<usize>() {
+        config.cloud_api.max_tokens = budget;
     }
-    config.ui.high_contrast = app.get_high_contrast();
+    config.ui.auto_speak = app.get_auto_speak();
     config
-}
-
-fn update_errors_display(app: &AppWindow, errors: &[String]) {
-    let text = if errors.is_empty() {
-        String::new()
-    } else {
-        errors.join("\n")
-    };
-    app.set_recent_errors(text.into());
 }
 
 async fn create_engine() -> Result<(Arc<Mutex<AleEngine>>, AppConfig), String> {
@@ -928,19 +700,6 @@ async fn save_settings(
             .map_err(|error| error.to_string())?;
     }
     create_engine().await
-}
-
-async fn describe_image_inner() -> Result<(Vec<u8>, String), String> {
-    file_picker::pick_image().await
-}
-
-async fn transcribe_audio(engine: Arc<Mutex<AleEngine>>, audio: Vec<u8>) -> Result<String, String> {
-    let engine = engine.lock().await;
-    ensure_api_key(engine.config())?;
-    engine
-        .transcribe(&audio)
-        .await
-        .map_err(|error| error.to_string())
 }
 
 async fn test_connection(engine: Arc<Mutex<AleEngine>>) -> Result<bool, String> {

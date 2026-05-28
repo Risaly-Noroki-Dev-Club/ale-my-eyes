@@ -58,6 +58,8 @@ pub struct ContextManager {
     current_tokens: usize,
     /// 最大 token 预算
     max_tokens: usize,
+    /// 会话累计消耗 token
+    session_tokens_used: usize,
     /// 系统提示
     system_prompt: String,
 }
@@ -67,11 +69,12 @@ impl ContextManager {
         Self {
             conversation: VecDeque::new(),
             visual_memory: VecDeque::new(),
-            max_visual: 10,
+            max_visual: 5,
             long_term_memory: Vec::new(),
             conversation_summary: None,
             current_tokens: 0,
             max_tokens,
+            session_tokens_used: 0,
             system_prompt: Self::default_system_prompt(),
         }
     }
@@ -176,7 +179,7 @@ impl ContextManager {
         // 2. 视觉上下文（最近帧摘要）
         if !self.visual_memory.is_empty() {
             let mut visual_context = String::from("最近的画面变化：\n");
-            for (i, frame) in self.visual_memory.iter().rev().take(3).enumerate() {
+            for (i, frame) in self.visual_memory.iter().rev().take(2).enumerate() {
                 visual_context.push_str(&format!(
                     "{}. [{}] {}\n",
                     i + 1,
@@ -242,18 +245,19 @@ impl ContextManager {
 
     /// 压缩对话（当 token 接近上限时）
     fn maybe_compact(&mut self) {
-        if self.current_tokens < self.max_tokens * 80 / 100 {
+        if self.current_tokens < self.max_tokens * 70 / 100 {
             return;
         }
 
-        // 将前半部分对话压缩为摘要
-        let half = self.conversation.len() / 2;
-        if half < 3 {
+        // 保留最近 6 条消息，压缩更早的对话
+        let keep = 6usize;
+        let compress_count = self.conversation.len().saturating_sub(keep);
+        if compress_count < 3 {
             return;
         }
 
         let mut summary_parts = Vec::new();
-        for _ in 0..half {
+        for _ in 0..compress_count {
             if let Some(entry) = self.conversation.pop_front() {
                 self.current_tokens = self.current_tokens.saturating_sub(entry.token_count);
                 if entry.role == Role::User || entry.role == Role::Assistant {
@@ -282,11 +286,21 @@ impl ContextManager {
         };
 
         // 进一步压缩：如果摘要也太长，只保留最后部分
-        self.conversation_summary = Some(if new_summary.len() > 2000 {
-            format!("...{}", &new_summary[new_summary.len() - 2000..])
+        self.conversation_summary = Some(if new_summary.len() > 1500 {
+            format!("...{}", &new_summary[new_summary.len() - 1500..])
         } else {
             new_summary
         });
+    }
+
+    /// 累加 API 调用消耗的 token
+    pub fn add_tokens(&mut self, tokens: usize) {
+        self.session_tokens_used += tokens;
+    }
+
+    /// 获取会话累计 token 消耗
+    pub fn session_tokens(&self) -> usize {
+        self.session_tokens_used
     }
 
     /// 简单的 token 估算（1 中文字符 ≈ 2 tokens，1 英文单词 ≈ 1 token）
@@ -302,6 +316,7 @@ impl ContextManager {
         self.visual_memory.clear();
         self.conversation_summary = None;
         self.current_tokens = 0;
+        self.session_tokens_used = 0;
     }
 
     /// 获取当前对话轮数

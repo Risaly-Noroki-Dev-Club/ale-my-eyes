@@ -217,44 +217,34 @@ impl AdaptiveInference {
             data: result,
             mode_used: mode,
             latency,
-            tokens_used: None,
+            tokens_used: Some(0),
         })
     }
 
     /// 图像描述推理
     pub async fn describe_image(&self, image_data: &[u8]) -> Result<InferenceResult<String>> {
         let start_time = Instant::now();
-
-        // 选择推理模式
         let mode = self.select_inference_mode(TaskComplexity::Complex);
 
-        let result = match mode {
-            InferenceMode::LocalOnly => {
-                // 本地推理（需要本地模型）
-                return Err(AleError::Other(anyhow::anyhow!(
-                    "Local inference not available"
-                )));
-            }
+        match mode {
+            InferenceMode::LocalOnly => Err(AleError::Other(anyhow::anyhow!(
+                "Local inference not available"
+            ))),
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
-                // 云端推理
                 let cloud_api = self
                     .cloud_api
                     .as_ref()
                     .ok_or(AleError::NotInitialized("Cloud API"))?;
 
                 let response = cloud_api.vision(image_data, "请描述这张图片的内容").await?;
-                response.content
+                Ok(InferenceResult {
+                    data: response.content,
+                    mode_used: mode,
+                    latency: start_time.elapsed(),
+                    tokens_used: Some(response.tokens_used),
+                })
             }
-        };
-
-        let latency = start_time.elapsed();
-
-        Ok(InferenceResult {
-            data: result,
-            mode_used: mode,
-            latency,
-            tokens_used: None,
-        })
+        }
     }
 
     /// 视觉问答推理（支持自定义问题 + Function Calling）
@@ -265,51 +255,39 @@ impl AdaptiveInference {
         tools: Option<Vec<serde_json::Value>>,
     ) -> Result<InferenceResult<crate::cloud::VisionResponse>> {
         let start_time = Instant::now();
-
         let mode = self.select_inference_mode(TaskComplexity::Complex);
 
-        let result = match mode {
-            InferenceMode::LocalOnly => {
-                return Err(AleError::Other(anyhow::anyhow!(
-                    "Local inference not available"
-                )));
-            }
+        match mode {
+            InferenceMode::LocalOnly => Err(AleError::Other(anyhow::anyhow!(
+                "Local inference not available"
+            ))),
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
                 let cloud_api = self
                     .cloud_api
                     .as_ref()
                     .ok_or(AleError::NotInitialized("Cloud API"))?;
 
-                cloud_api.vision_ask(image_data, question, tools).await?
+                let resp = cloud_api.vision_ask(image_data, question, tools).await?;
+                Ok(InferenceResult {
+                    data: resp.clone(),
+                    mode_used: mode,
+                    latency: start_time.elapsed(),
+                    tokens_used: Some(resp.tokens_used),
+                })
             }
-        };
-
-        let latency = start_time.elapsed();
-
-        Ok(InferenceResult {
-            data: result,
-            mode_used: mode,
-            latency,
-            tokens_used: None,
-        })
+        }
     }
 
     /// 文本生成推理
     pub async fn generate(&self, prompt: &str) -> Result<InferenceResult<String>> {
         let start_time = Instant::now();
-
-        // 选择推理模式
         let mode = self.select_inference_mode(TaskComplexity::Medium);
 
-        let result = match mode {
-            InferenceMode::LocalOnly => {
-                // 本地推理（需要本地模型）
-                return Err(AleError::Other(anyhow::anyhow!(
-                    "Local inference not available"
-                )));
-            }
+        match mode {
+            InferenceMode::LocalOnly => Err(AleError::Other(anyhow::anyhow!(
+                "Local inference not available"
+            ))),
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
-                // 云端推理
                 let cloud_api = self
                     .cloud_api
                     .as_ref()
@@ -321,18 +299,14 @@ impl AdaptiveInference {
                 }];
 
                 let response = cloud_api.chat(messages).await?;
-                response.content
+                Ok(InferenceResult {
+                    data: response.content,
+                    mode_used: mode,
+                    latency: start_time.elapsed(),
+                    tokens_used: Some(response.tokens_used),
+                })
             }
-        };
-
-        let latency = start_time.elapsed();
-
-        Ok(InferenceResult {
-            data: result,
-            mode_used: mode,
-            latency,
-            tokens_used: None,
-        })
+        }
     }
 }
 

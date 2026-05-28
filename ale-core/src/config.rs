@@ -98,6 +98,7 @@ pub struct UiConfig {
     pub font_size: u32,
     pub high_contrast: bool,
     pub screen_reader: bool,
+    pub auto_speak: bool,
 }
 
 impl Default for UiConfig {
@@ -108,6 +109,7 @@ impl Default for UiConfig {
             font_size: 16,
             high_contrast: false,
             screen_reader: true,
+            auto_speak: true,
         }
     }
 }

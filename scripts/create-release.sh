@@ -104,19 +104,19 @@ cat > release/ale-my-eyes-quickstart/快速开始.md << 'EOF'
 
 ## 使用
 ### Windows
-运行 `start-server.bat` 和 `start-gui.bat`
+运行 `start-gui.bat`
 
 ### Linux
 运行 `./start.sh`
 
 ### Android
-安装 APK 文件
+安装 APK 文件，打开即用
 
 ## 功能
-- 语音识别：麦克风输入
-- 语音合成：语音反馈
-- 图像描述：屏幕内容理解
-- 智能推理：自动选择最佳方式
+- 启动即监听：应用初始化完成后自动开始语音监听
+- 语音问答：对屏幕/摄像头说话，AI 结合画面回答
+- 桌面自动化：AI 返回操作指令，高风险操作需确认
+- Token 追踪：底部显示当前会话 token 消耗
 
 ## 获取帮助
 访问 GitHub 项目主页获取更多信息。

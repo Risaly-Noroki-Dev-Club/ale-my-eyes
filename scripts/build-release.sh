@@ -119,7 +119,8 @@ cat > dist/config/config.json.example << 'EOF'
     "theme": "system",
     "font_size": 16,
     "high_contrast": false,
-    "screen_reader": true
+    "screen_reader": true,
+    "auto_speak": true
   }
 }
 EOF
@@ -146,9 +147,9 @@ cat > dist/QUICKSTART.md << 'EOF'
 安装 APK 文件并打开应用
 
 ## 4. 开始使用
-- 语音识别：点击麦克风按钮开始录音
-- 图像描述：上传图像或使用相机拍照
-- 语音合成：系统会自动朗读屏幕内容
+- 应用启动后自动开始监听，直接说话即可
+- 点击 ⚙ 图标打开设置
+- AI 回答会自动朗读（可在设置中关闭）
 EOF
 
 echo "构建产物准备完成！"

@@ -4,41 +4,41 @@
 [![Rust](https://img.shields.io/badge/Made%20with-Rust-red.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-blue.svg)]()
 
-> 对着摄像头或屏幕说话，AI 用自然语言回答你的问题，还能帮你操作电脑
+> 对着屏幕说话，AI 用自然语言回答你的问题，还能帮你操作电脑
 
 ## 项目简介
 
-**Ale, My Eyes!** 是一个基于 Rust 的跨平台智能视觉辅助系统。用户通过语音向设备提问，AI 结合摄像头画面或屏幕截图给出自然语言回答，并可在桌面端自动执行键鼠操作。
+**Ale, My Eyes!** 是一个基于 Rust 的跨平台智能视觉辅助系统。小窗口常驻桌面底部，启动后自动监听语音，结合屏幕画面给出自然语言回答，并可在桌面端自动执行键鼠操作。
 
-**两种使用模式：**
+**核心体验：启动即用，无需手动操作。**
 
 | 平台 | 交互方式 |
 |------|----------|
+| **PC/Linux** | 360x190px 通知卡片常驻桌面，持续监听屏幕，语音下达指令，AI 自动操作 |
 | **Android** | 打开即是相机界面，持续监听语音，对着摄像头提问，AI 实时回答 |
-| **PC/Linux** | 小窗口常驻，持续监控屏幕，语音下达指令，AI 自动操作键鼠 |
 
 ## 功能特性
 
 ### 语音交互
-- **持续监听** — 应用启动即开始录音，VAD 自动检测说话结束并触发处理
+- **启动即监听** — 应用初始化完成后自动开始录音，无需手动触发
 - **语音活动检测** — 基于能量的 VAD 状态机（静默 → 说话中 → 说话结束）
 - **多语言识别** — 本地支持 17 种语言 + 自动检测，云端支持 100+ 种
-- **语音合成** — AI 回答自动朗读，高风险操作语音解释并等待确认
+- **语音合成** — AI 回答自动朗读，可在设置中关闭
 
 ### 视觉理解
-- **视觉问答** — 对摄像头画面或屏幕截图提问，AI 用自然语言回答
+- **视觉问答** — 对屏幕画面或摄像头提问，AI 用自然语言回答
 - **上下文管理** — 自动维护对话历史、视觉记忆和长期记忆，智能压缩
-- **按需截帧** — 说话时截取当前画面，连同语音一起发送给 AI
+- **Token 追踪** — 底部实时显示当前会话 token 消耗
 
 ### 桌面自动化
 - **全功能键鼠控制** — 点击、滚动、打字、快捷键、打开/关闭应用、文件操作
-- **风险分级** — 低风险自动执行，高风险语音解释原因后等待用户确认
+- **风险分级** — 低风险自动执行，高风险语音解释后等待用户确认
 - **结构化操作** — AI 通过 Function Calling 返回可执行的操作指令
 
-### 跨平台
-- **云端 + 本地** — 复杂任务走云端 API，简单任务本地离线处理
-- **自适应推理** — 根据设备性能和网络状态自动选择最佳推理方式
-- **共享代码** — 桌面和 Android 共享 Rust 核心库 + Slint UI
+### 跨平台原生样式
+- **Windows** — Fluent Design 风格（Slint `fluent` 样式）
+- **Android** — Material Design 3 风格（Slint `material` 样式）
+- **自定义组件** — 通过 `Palette` 着色系统自动融入平台风格
 
 ## 快速开始
 
@@ -52,12 +52,13 @@
 
 ### 配置 API 密钥
 
-1. 打开应用，进入 **设置** 页面
+1. 启动应用，点击右上角 **⚙** 图标打开设置
 2. 填写 API Key（OpenAI 或兼容接口）
 3. API URL 默认 `https://api.openai.com/v1`，可改为 OpenRouter、Azure 等
 4. 点击 **测试连接** 验证配置
+5. 点击 **保存**
 
-### 启动使用
+### 开始使用
 
 ```bash
 # 桌面 GUI
@@ -66,6 +67,8 @@ cargo run -p ale-gui
 # 命令行
 cargo run -p ale-cli -- transcribe --audio input.wav
 ```
+
+应用启动后自动开始监听，直接说话即可。
 
 ## 技术架构
 
@@ -77,10 +80,10 @@ ale-my-eyes-rust/
 │   ├── src/
 │   │   ├── lib.rs             # AleEngine 主入口
 │   │   ├── cloud.rs           # 云端 API（OpenAI 兼容 + Function Calling）
-│   │   ├── inference.rs       # 自适应推理引擎
+│   │   ├── inference.rs       # 自适应推理引擎（token 追踪）
 │   │   ├── vad.rs             # 语音活动检测（VAD）
 │   │   ├── actions.rs         # 操作指令协议（11 种操作 + 风险分级）
-│   │   ├── context.rs         # 上下文管理（对话/视觉/长期记忆）
+│   │   ├── context.rs         # 上下文管理（对话/视觉/长期记忆 + token 预算）
 │   │   ├── config.rs          # 配置系统
 │   │   ├── asr.rs             # 本地 ASR（whisper-rs）
 │   │   ├── vlm.rs             # 本地 VLM
@@ -92,12 +95,10 @@ ale-my-eyes-rust/
 ├── ale-cli/                   # 命令行工具
 ├── ale-gui/                   # 跨平台 GUI (Slint)
 │   ├── ui/
-│   │   ├── app.slint          # 主窗口 + 导航
-│   │   ├── main-screen.slint  # 移动端主界面
-│   │   ├── desktop-screen.slint # 桌面浮动窗口
-│   │   ├── settings-screen.slint
-│   │   ├── diagnostics-screen.slint
-│   │   └── widgets.slint      # 通用组件库
+│   │   ├── app.slint          # 主窗口（360x190px 通知卡片）
+│   │   ├── compact.slint      # 主界面（状态+转写+AI回答+token+输入）
+│   │   ├── settings-popup.slint # 设置弹窗
+│   │   └── widgets.slint      # 通用组件（Palette 着色）
 │   └── src/
 │       ├── lib.rs             # 共享逻辑 + AppState
 │       ├── main.rs            # 桌面入口
@@ -118,7 +119,7 @@ ale-my-eyes-rust/
 |------|------|------|
 | VAD | `ale-core/src/vad.rs` | 能量检测 + 状态机，自适应阈值 |
 | Actions | `ale-core/src/actions.rs` | 11 种操作类型，3 级风险评估 |
-| Context | `ale-core/src/context.rs` | 对话历史 + 视觉记忆 + 长期记忆，自动压缩 |
+| Context | `ale-core/src/context.rs` | 对话历史 + 视觉记忆 + 长期记忆，token 预算压缩 |
 | Vision API | `ale-core/src/cloud.rs` | 自定义问题 + Function Calling |
 | Screen Capture | `ale-gui/src/screen_capture.rs` | 持续/按需截图，缩放，JPEG 编码 |
 | Automation | `ale-gui/src/automation.rs` | 鼠标/键盘/文件/URL/应用操作 |
@@ -128,7 +129,7 @@ ale-my-eyes-rust/
 
 | 层级 | 技术 |
 |------|------|
-| GUI 框架 | Slint 1.16（跨平台声明式 UI） |
+| GUI 框架 | Slint 1.16（跨平台声明式 UI，原生样式） |
 | 本地 ASR | whisper-rs 0.16（whisper.cpp FFI） |
 | 云端 ASR | OpenAI Whisper API |
 | 视觉理解 | OpenAI GPT-4o Vision + Function Calling |
@@ -142,16 +143,16 @@ ale-my-eyes-rust/
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Android: 相机帧 + 语音 ──┐                              │
-│                           ├→ 云端 API (GPT-4o)          │
-│  Desktop: 屏幕截图 + 语音 ─┘   ├→ 语音转文字 (Whisper)   │
-│                                ├→ 视觉问答 (Vision)      │
-│                                └→ 操作指令 (Function Call)│
-│                                         │                │
-│                    ┌────────────────────┘                │
-│                    ▼                                      │
-│  Android: TTS 朗读回答 + 显示文字                         │
+│  Desktop: 屏幕截图 + 语音 ──┐                            │
+│                             ├→ 云端 API (GPT-4o)         │
+│  Android: 相机帧 + 语音 ────┘   ├→ 语音转文字 (Whisper)   │
+│                                  ├→ 视觉问答 (Vision)     │
+│                                  └→ 操作指令 (Func Call)  │
+│                                          │               │
+│                     ┌────────────────────┘               │
+│                     ▼                                     │
 │  Desktop:  TTS 朗读 + 执行键鼠操作（高风险需确认）        │
+│  Android:  TTS 朗读回答 + 显示文字                        │
 └─────────────────────────────────────────────────────────┘
 ```
 

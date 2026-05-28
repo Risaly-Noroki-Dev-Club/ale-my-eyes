@@ -95,7 +95,7 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: Risaly Noroki Dev Club <erika@risnordev.org>
-          Description: Intelligent accessibility assistant
+          Description: Intelligent visual assistant with voice and screen understanding
           EOF
           dpkg-deb --build "${PACKAGE_ROOT}" ale-my-eyes_0.1.0_amd64.deb
 
