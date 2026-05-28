@@ -129,7 +129,7 @@ jobs:
 
       - name: Build
         env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
+          ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.2.9519653
         run: |
           cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
           cp target/aarch64-linux-android/release/apk/ale-gui.apk ale-my-eyes-android.apk
