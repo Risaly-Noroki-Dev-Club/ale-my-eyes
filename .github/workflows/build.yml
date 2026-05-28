@@ -128,9 +128,9 @@ jobs:
         run: ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653"
 
       - name: Build
-        env:
-          ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.2.9519653
         run: |
+          unset ANDROID_NDK_ROOT
+          export ANDROID_NDK_ROOT="/usr/local/lib/android/sdk/ndk/25.2.9519653"
           cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
           cp target/aarch64-linux-android/release/apk/ale-gui.apk ale-my-eyes-android.apk
 
