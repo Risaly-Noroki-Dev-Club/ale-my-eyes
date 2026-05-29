@@ -131,10 +131,11 @@ jobs:
 
       - name: Build
         run: |
-          unset ANDROID_NDK_ROOT
-          export ANDROID_NDK_ROOT="/usr/local/lib/android/sdk/ndk/25.2.9519653"
+          export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
           cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
-          cp target/aarch64-linux-android/release/apk/ale-gui.apk ale-my-eyes-android.apk
+          APK_PATH=$(find target/aarch64-linux-android/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+          test -n "${APK_PATH}"
+          cp "${APK_PATH}" ale-my-eyes-android.apk
 
       - name: Upload Android apk
         uses: actions/upload-artifact@v4

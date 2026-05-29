@@ -54,15 +54,15 @@ echo -e "${YELLOW}创建输出目录: ${PACKAGE_DIR}${NC}"
 rm -rf "${PACKAGE_DIR}"
 mkdir -p "${PACKAGE_DIR}"
 
-APK_ARM64="target/aarch64-linux-android/release/apk/ale-gui.apk"
-APK_ARMV7="target/armv7-linux-androideabi/release/apk/ale-gui.apk"
+APK_ARM64=$(find target/aarch64-linux-android/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+APK_ARMV7=$(find target/armv7-linux-androideabi/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
 
-if [ -f "$APK_ARM64" ]; then
+if [ -n "$APK_ARM64" ] && [ -f "$APK_ARM64" ]; then
     cp "$APK_ARM64" "${PACKAGE_DIR}/ale-my-eyes-arm64.apk"
     echo -e "${GREEN}arm64 APK: ${PACKAGE_DIR}/ale-my-eyes-arm64.apk${NC}"
 fi
 
-if [ -f "$APK_ARMV7" ]; then
+if [ -n "$APK_ARMV7" ] && [ -f "$APK_ARMV7" ]; then
     cp "$APK_ARMV7" "${PACKAGE_DIR}/ale-my-eyes-armv7.apk"
     echo -e "${GREEN}armv7 APK: ${PACKAGE_DIR}/ale-my-eyes-armv7.apk${NC}"
 fi

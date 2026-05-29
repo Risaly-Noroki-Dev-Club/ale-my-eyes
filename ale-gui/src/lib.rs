@@ -3,6 +3,9 @@ pub mod file_picker;
 pub mod tts_player;
 
 #[cfg(target_os = "android")]
+mod android;
+
+#[cfg(target_os = "android")]
 pub mod camera;
 
 #[cfg(not(target_os = "android"))]
