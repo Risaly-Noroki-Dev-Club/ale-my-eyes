@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 
 #[cfg(target_os = "android")]
-use oboe::{AudioInputCallback, AudioInputStreamSafe, DataCallbackResult, Mono};
+use oboe::{AudioInputCallback, AudioInputStreamSafe, AudioStream, DataCallbackResult, Mono};
 
 pub struct Recorder {
     #[cfg(not(target_os = "android"))]

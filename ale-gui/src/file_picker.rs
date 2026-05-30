@@ -51,7 +51,7 @@ async fn pick_image_android() -> Result<(Vec<u8>, String), String> {
         .map_err(|error| format!("找不到 Intent 类: {error}"))?;
 
     let action = env
-        .get_static_field(intent_class, "ACTION_GET_CONTENT", "Ljava/lang/String;")
+        .get_static_field(&intent_class, "ACTION_GET_CONTENT", "Ljava/lang/String;")
         .map_err(|error| format!("获取 ACTION_GET_CONTENT 失败: {error}"))?;
     let action = action
         .l()
@@ -59,7 +59,7 @@ async fn pick_image_android() -> Result<(Vec<u8>, String), String> {
 
     let intent = env
         .new_object(
-            intent_class,
+            &intent_class,
             "(Ljava/lang/String;)V",
             &[jni::objects::JValue::Object(&action)],
         )
