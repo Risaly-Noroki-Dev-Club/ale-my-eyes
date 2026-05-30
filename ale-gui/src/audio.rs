@@ -122,7 +122,7 @@ impl Recorder {
         let samples = Arc::new(StdMutex::new(Vec::new()));
         let samples_clone = samples.clone();
 
-        let stream = AudioStreamBuilder::default()
+        let mut stream = AudioStreamBuilder::default()
             .set_input()
             .set_performance_mode(PerformanceMode::LowLatency)
             .set_sharing_mode(SharingMode::Shared)
