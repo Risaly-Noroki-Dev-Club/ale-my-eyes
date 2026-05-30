@@ -99,152 +99,17 @@ impl Drop for AndroidCamera {
 /// 初始化 Android 相机（通过 JNI）
 #[cfg(target_os = "android")]
 fn init_camera(
-    latest_frame: Arc<Mutex<Option<CameraFrame>>>,
+    _latest_frame: Arc<Mutex<Option<CameraFrame>>>,
     running: Arc<Mutex<bool>>,
-    width: u32,
-    height: u32,
+    _width: u32,
+    _height: u32,
 ) -> Result<()> {
-    use jni::objects::{JObject, JValue};
-    use ndk_context::android_context;
-
-    let ctx = android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get JVM: {}", e)))?;
-    let mut env = vm
-        .attach_current_thread()
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to attach thread: {}", e)))?;
-
-    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
-
-    // 获取 CameraManager
-    let camera_service = env
-        .call_method(
-            &activity,
-            "getSystemService",
-            "(Ljava/lang/String;)Ljava/lang/Object;",
-            &[JValue::Object(&env.new_string("camera")?.into())],
-        )
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get CameraManager: {}", e)))?
-        .l()
-        .map_err(|e| {
-            AleError::Other(anyhow::anyhow!("Failed to get CameraManager object: {}", e))
-        })?;
-
-    // 获取后置相机 ID
-    let camera_ids = env
-        .call_method(
-            &camera_service,
-            "getCameraIdList",
-            "()[Ljava/lang/String;",
-            &[],
-        )
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get camera IDs: {}", e)))?
-        .l()
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get camera IDs array: {}", e)))?;
-
-    let camera_ids_array = env
-        .get_array_length(&camera_ids.into())
-        .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get array length: {}", e)))?;
-
-    let mut back_camera_id: Option<String> = None;
-    for i in 0..camera_ids_array {
-        let id = env
-            .get_object_array_element(&camera_ids.into(), i)
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get camera ID: {}", e)))?
-            .l()
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!("Failed to get camera ID string: {}", e))
-            })?;
-
-        let id_str: String = env
-            .get_string(&id.into())
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to convert string: {}", e)))?
-            .into();
-
-        // 检查是否为后置相机
-        let characteristics = env
-            .call_method(
-                &camera_service,
-                "getCameraCharacteristics",
-                "(Ljava/lang/String;)Landroid/hardware/camera2/CameraCharacteristics;",
-                &[JValue::Object(&env.new_string(&id_str)?.into())],
-            )
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!(
-                    "Failed to get camera characteristics: {}",
-                    e
-                ))
-            })?
-            .l()
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!(
-                    "Failed to get camera characteristics object: {}",
-                    e
-                ))
-            })?;
-
-        let lens_facing = env
-            .get_static_field(
-                "android/hardware/camera2/CameraCharacteristics",
-                "LENS_FACING",
-                "Landroid/hardware/camera2/CameraCharacteristics$Key;",
-            )
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get LENS_FACING key: {}", e)))?
-            .l()
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!(
-                    "Failed to get LENS_FACING key object: {}",
-                    e
-                ))
-            })?;
-
-        let facing = env
-            .call_method(
-                &characteristics,
-                "get",
-                "(Landroid/hardware/camera2/CameraCharacteristics$Key;)Ljava/lang/Object;",
-                &[JValue::Object(&lens_facing)],
-            )
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get lens facing: {}", e)))?
-            .l()
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!("Failed to get lens facing value: {}", e))
-            })?;
-
-        let facing_int = env
-            .call_method(&facing, "intValue", "()I", &[])
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get int value: {}", e)))?
-            .i()
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to get int: {}", e)))?;
-
-        // LENS_FACING_BACK = 1
-        if facing_int == 1 {
-            back_camera_id = Some(id_str);
-            break;
-        }
-    }
-
-    let camera_id =
-        back_camera_id.ok_or_else(|| AleError::Other(anyhow::anyhow!("No back camera found")))?;
-
-    tracing::info!("Opening camera: {}", camera_id);
-
-    // 注意：完整的 Camera2 API 集成需要更多代码
-    // 这里提供框架，实际实现需要：
-    // 1. 创建 CaptureSession
-    // 2. 设置 ImageReader
-    // 3. 处理回调获取帧数据
-    // 4. YUV_420_888 到 RGBA 转换
-
-    // 为了简化，我们使用一个轮询方案
-    // 实际产品中应该使用 Camera2 的回调机制
-
     while {
         let r = running.lock().unwrap();
         *r
     } {
-        // TODO: 从 ImageReader 获取帧并转换
-        std::thread::sleep(std::time::Duration::from_millis(33)); // ~30fps
+        // TODO: Wire Camera2/ImageReader callbacks here. Keep the worker alive for now.
+        std::thread::sleep(std::time::Duration::from_millis(33));
     }
 
     Ok(())

@@ -1,6 +1,9 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 
+#[cfg(target_os = "android")]
+use oboe::{AudioInputCallback, AudioInputStreamSafe, AudioStream, DataCallbackResult, Mono};
+
 pub struct Recorder {
     #[cfg(not(target_os = "android"))]
     stream: cpal::Stream,
@@ -114,15 +117,13 @@ impl Recorder {
 
     #[cfg(target_os = "android")]
     fn start_android() -> Result<Self, String> {
-        use oboe::{
-            AudioInputCallback, AudioInputStream, AudioStreamBuilder, DataCallbackResult, Mono,
-            PerformanceMode, SharingMode,
-        };
+        use oboe::{AudioStreamBuilder, PerformanceMode, SharingMode};
 
         let samples = Arc::new(StdMutex::new(Vec::new()));
         let samples_clone = samples.clone();
 
-        let stream = AudioStreamBuilder::default()
+        let mut stream = AudioStreamBuilder::default()
+            .set_input()
             .set_performance_mode(PerformanceMode::LowLatency)
             .set_sharing_mode(SharingMode::Shared)
             .set_format::<f32>()
@@ -160,7 +161,7 @@ impl AudioInputCallback for RecorderCallback {
 
     fn on_audio_ready(
         &mut self,
-        _stream: &mut dyn AudioInputStream,
+        _stream: &mut dyn AudioInputStreamSafe,
         frames: &[f32],
     ) -> DataCallbackResult {
         if let Ok(mut buffer) = self.samples.lock() {

@@ -17,6 +17,14 @@ on:
         description: 'Release tag for manual publishing; defaults to manual-<run number> when empty'
         required: false
         type: string
+      build_target:
+        description: 'Build target for manual runs'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - android
 
 permissions:
   contents: write
@@ -25,6 +33,7 @@ jobs:
   check:
     name: Check workspace
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_target != 'android'
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +52,7 @@ jobs:
   build-windows:
     name: Build Windows executable
     needs: check
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.build_target != 'android') || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     defaults:
       run:
@@ -68,7 +77,7 @@ jobs:
   build-linux:
     name: Build Ubuntu deb
     needs: check
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.build_target != 'android') || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +116,6 @@ jobs:
 
   build-android:
     name: Build Android package
-    needs: check
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -115,6 +123,12 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Install Android targets
         run: |
@@ -126,16 +140,19 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653"
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          export ANDROID_HOME="${ANDROID_SDK_ROOT}"
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "ndk;25.2.9519653"
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-30"
+          yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses
 
       - name: Build
         run: |
-          export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
-          cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
-          APK_PATH=$(find target/aarch64-linux-android/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
-          test -n "${APK_PATH}"
-          cp "${APK_PATH}" ale-my-eyes-android.apk
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          export ANDROID_HOME="${ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_ROOT="${ANDROID_SDK_ROOT}/ndk/25.2.9519653"
+          ./scripts/package-android.sh
+          cp ale-my-eyes-android/ale-my-eyes-arm64.apk ale-my-eyes-android.apk
 
       - name: Upload Android apk
         uses: actions/upload-artifact@v4

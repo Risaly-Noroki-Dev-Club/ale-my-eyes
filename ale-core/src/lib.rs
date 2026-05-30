@@ -6,6 +6,7 @@ pub mod downloader;
 pub mod error;
 pub mod inference;
 pub mod manager;
+pub mod memory;
 pub mod types;
 pub mod vad;
 
@@ -36,6 +37,7 @@ pub struct AleEngine {
     inference_engine: inference::AdaptiveInference,
     cloud_api: bool,
     context_manager: context::ContextManager,
+    memory_store: memory::MemoryStore,
     #[cfg(feature = "tts")]
     tts: Option<Box<dyn tts::TextToSpeech>>,
 }
@@ -121,12 +123,21 @@ impl AleEngine {
             }
         }
 
+        let memory_path = config_path
+            .parent()
+            .map(|parent| parent.join("memory.json"))
+            .unwrap_or_else(memory::MemoryStore::default_path);
+        let memory_store = memory::MemoryStore::load_or_create(memory_path)?;
+        let mut context_manager = context::ContextManager::new(4000);
+        context_manager.replace_memories(memory_store.memories().to_vec());
+
         Ok(Self {
             config_manager,
             model_manager: Arc::new(Mutex::new(model_manager)),
             inference_engine,
             cloud_api: cloud_ready,
-            context_manager: context::ContextManager::new(4000),
+            context_manager,
+            memory_store,
             #[cfg(feature = "tts")]
             tts: None,
         })
@@ -253,6 +264,17 @@ impl AleEngine {
         Ok(result.data)
     }
 
+    /// 视觉问答并自动学习稳定记忆。
+    pub async fn ask_about_image_with_memory(
+        &mut self,
+        image_data: &[u8],
+        question: &str,
+    ) -> Result<cloud::VisionResponse> {
+        let result = self.ask_about_image(image_data, question).await?;
+        let _ = self.learn_from_interaction(question, &result.content)?;
+        Ok(result)
+    }
+
     /// 视觉问答（带工具调用支持）
     pub async fn ask_about_image_with_tools(
         &self,
@@ -275,6 +297,62 @@ impl AleEngine {
     /// 获取上下文管理器的不可变引用
     pub fn context(&self) -> &context::ContextManager {
         &self.context_manager
+    }
+
+    /// 添加并持久化长期记忆。
+    pub fn add_memory(&mut self, entry: context::MemoryEntry) -> Result<bool> {
+        let added = self.memory_store.add(entry)?;
+        if added {
+            self.context_manager
+                .replace_memories(self.memory_store.memories().to_vec());
+        }
+        Ok(added)
+    }
+
+    /// 搜索持久化长期记忆。
+    pub fn search_memories(&self, query: &str, limit: usize) -> Vec<&context::MemoryEntry> {
+        self.memory_store.search(query, limit)
+    }
+
+    /// 删除并同步长期记忆。
+    pub fn delete_memory(&mut self, id: &str) -> Result<bool> {
+        let deleted = self.memory_store.delete(id)?;
+        if deleted {
+            self.context_manager
+                .replace_memories(self.memory_store.memories().to_vec());
+        }
+        Ok(deleted)
+    }
+
+    /// 清空持久化长期记忆。
+    pub fn clear_memories(&mut self) -> Result<()> {
+        self.memory_store.clear()?;
+        self.context_manager.replace_memories(Vec::new());
+        Ok(())
+    }
+
+    /// 获取长期记忆文件路径。
+    pub fn memory_path(&self) -> &Path {
+        self.memory_store.path()
+    }
+
+    /// 从一次交互中自动提取并持久化长期记忆。
+    pub fn learn_from_interaction(&mut self, question: &str, answer: &str) -> Result<usize> {
+        let candidates = memory::extract_memories(question, answer);
+        let mut added = 0usize;
+
+        for entry in candidates {
+            if self.memory_store.add(entry)? {
+                added += 1;
+            }
+        }
+
+        if added > 0 {
+            self.context_manager
+                .replace_memories(self.memory_store.memories().to_vec());
+        }
+
+        Ok(added)
     }
 
     /// 自动下载推荐模型
@@ -373,6 +451,7 @@ impl Default for AleEngine {
             inference_engine,
             cloud_api: false,
             context_manager: context::ContextManager::new(4000),
+            memory_store: memory::MemoryStore::new(memory::MemoryStore::default_path()),
             #[cfg(feature = "tts")]
             tts: None,
         }

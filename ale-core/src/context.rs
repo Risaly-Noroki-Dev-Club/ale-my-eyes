@@ -1,6 +1,8 @@
 use crate::cloud::CloudMessage;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use uuid::Uuid;
 
 /// 上下文条目角色
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,9 +39,35 @@ pub enum FrameSource {
 /// 长期记忆条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
+    #[serde(default = "MemoryEntry::new_id")]
+    pub id: String,
     pub content: String,
     pub importance: f32,
     pub source: String,
+    #[serde(default = "Utc::now")]
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub last_used_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl MemoryEntry {
+    pub fn new(content: String, importance: f32, source: String) -> Self {
+        Self {
+            id: Self::new_id(),
+            content,
+            importance,
+            source,
+            created_at: Utc::now(),
+            last_used_at: None,
+            tags: Vec::new(),
+        }
+    }
+
+    fn new_id() -> String {
+        Uuid::new_v4().to_string()
+    }
 }
 
 /// 上下文管理器
@@ -155,6 +183,58 @@ impl ContextManager {
         self.long_term_memory.push(entry);
     }
 
+    /// 批量替换长期记忆，通常用于加载持久化记忆。
+    pub fn replace_memories(&mut self, memories: Vec<MemoryEntry>) {
+        self.long_term_memory = memories;
+    }
+
+    /// 获取所有长期记忆。
+    pub fn memories(&self) -> &[MemoryEntry] {
+        &self.long_term_memory
+    }
+
+    /// 基于当前问题选择最相关的长期记忆，避免无差别注入过多上下文。
+    pub fn relevant_memories(&self, query: &str, limit: usize) -> Vec<&MemoryEntry> {
+        let query_terms = extract_terms(query);
+        let mut scored = self
+            .long_term_memory
+            .iter()
+            .map(|memory| {
+                let content_lower = memory.content.to_lowercase();
+                let tag_lower = memory.tags.join(" ").to_lowercase();
+                let source_lower = memory.source.to_lowercase();
+
+                let term_score = query_terms
+                    .iter()
+                    .filter(|term| {
+                        content_lower.contains(term.as_str())
+                            || tag_lower.contains(term.as_str())
+                            || source_lower.contains(term.as_str())
+                    })
+                    .count() as f32;
+                let tag_score = memory.tags.len().min(5) as f32 * 0.05;
+                let used_score = if memory.last_used_at.is_some() {
+                    0.1
+                } else {
+                    0.0
+                };
+
+                (
+                    memory,
+                    term_score * 2.0 + memory.importance + tag_score + used_score,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored
+            .into_iter()
+            .filter(|(_, score)| *score > 0.0)
+            .take(limit)
+            .map(|(memory, _)| memory)
+            .collect()
+    }
+
     /// 构建发送给 AI 的消息列表
     pub fn build_messages(
         &self,
@@ -165,9 +245,10 @@ impl ContextManager {
 
         // 1. 系统提示（含长期记忆）
         let mut system = self.system_prompt.clone();
-        if !self.long_term_memory.is_empty() {
+        let memories = self.relevant_memories(current_question, 8);
+        if !memories.is_empty() {
             system.push_str("\n\n用户相关记忆：\n");
-            for mem in &self.long_term_memory {
+            for mem in memories {
                 system.push_str(&format!("- {}\n", mem.content));
             }
         }
@@ -330,6 +411,28 @@ impl ContextManager {
     }
 }
 
+fn extract_terms(text: &str) -> HashSet<String> {
+    let mut terms = text
+        .split(|c: char| !c.is_alphanumeric() && !is_cjk(c))
+        .map(|term| term.trim().to_lowercase())
+        .filter(|term| term.chars().count() >= 2)
+        .collect::<HashSet<_>>();
+
+    let cjk_chars = text.chars().filter(|c| is_cjk(*c)).collect::<Vec<_>>();
+    for window in cjk_chars.windows(2) {
+        terms.insert(window.iter().collect());
+    }
+
+    terms
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,16 +495,24 @@ mod tests {
     fn test_memory() {
         let mut ctx = ContextManager::new(4000);
         ctx.add_memory(MemoryEntry {
+            id: "memory-1".to_string(),
             content: "用户喜欢简洁的回答".to_string(),
             importance: 0.8,
             source: "对话".to_string(),
+            created_at: Utc::now(),
+            last_used_at: None,
+            tags: vec!["偏好".to_string()],
         });
 
         // 重复记忆不添加
         ctx.add_memory(MemoryEntry {
+            id: "memory-2".to_string(),
             content: "用户喜欢简洁的回答".to_string(),
             importance: 0.9,
             source: "对话".to_string(),
+            created_at: Utc::now(),
+            last_used_at: None,
+            tags: vec![],
         });
         assert_eq!(ctx.long_term_memory.len(), 1);
     }
