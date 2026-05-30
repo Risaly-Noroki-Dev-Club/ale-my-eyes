@@ -17,6 +17,14 @@ on:
         description: 'Release tag for manual publishing; defaults to manual-<run number> when empty'
         required: false
         type: string
+      build_target:
+        description: 'Build target for manual runs'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - android
 
 permissions:
   contents: write
@@ -25,6 +33,7 @@ jobs:
   check:
     name: Check workspace
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_target != 'android'
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +52,7 @@ jobs:
   build-windows:
     name: Build Windows executable
     needs: check
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.build_target != 'android') || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     defaults:
       run:
@@ -68,7 +77,7 @@ jobs:
   build-linux:
     name: Build Ubuntu deb
     needs: check
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.build_target != 'android') || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +116,6 @@ jobs:
 
   build-android:
     name: Build Android package
-    needs: check
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
