@@ -35,21 +35,12 @@ jobs:
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-30"
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses
 
-      - name: Prepare Android signing keystore
-        run: |
-          KEYSTORE_PATH="$RUNNER_TEMP/android-release.keystore"
-          keytool -genkeypair -v -storetype PKCS12 -keystore "$KEYSTORE_PATH" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          echo "CARGO_APK_RELEASE_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
-
       - name: Build Android APK
         run: |
           ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
-          cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
-          APK_PATH=$(find target/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
-          test -n "${APK_PATH}"
-          cp "${APK_PATH}" ale-my-eyes-android.apk
+          ./scripts/package-android.sh
+          cp ale-my-eyes-android/ale-my-eyes-arm64.apk ale-my-eyes-android.apk
 
       - name: Upload Android apk
         uses: actions/upload-artifact@v4
