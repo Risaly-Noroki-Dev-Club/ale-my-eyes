@@ -47,7 +47,7 @@ jobs:
           ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
           cargo apk build -p ale-gui --target aarch64-linux-android --lib --release
-          APK_PATH=$(find target/aarch64-linux-android/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+          APK_PATH=$(find target/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
           test -n "${APK_PATH}"
           cp "${APK_PATH}" ale-my-eyes-android.apk
 
