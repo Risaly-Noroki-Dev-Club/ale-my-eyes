@@ -35,6 +35,9 @@ if [ -z "$ANDROID_NDK_ROOT" ]; then
     exit 1
 fi
 
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+
 # Add Android targets
 echo -e "${YELLOW}添加 Android 目标...${NC}"
 rustup target add aarch64-linux-android
