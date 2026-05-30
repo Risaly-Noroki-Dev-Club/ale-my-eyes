@@ -22,8 +22,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android target
-        run: rustup target add aarch64-linux-android
+      - name: Install Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
 
       - name: Install cargo-apk
         run: cargo install cargo-apk
@@ -40,10 +42,11 @@ jobs:
           ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
           ./scripts/package-android.sh
-          cp ale-my-eyes-android/ale-my-eyes-arm64.apk ale-my-eyes-android.apk
 
-      - name: Upload Android apk
+      - name: Upload Android apks
         uses: actions/upload-artifact@v4
         with:
           name: ale-my-eyes-android
-          path: ale-my-eyes-android.apk
+          path: |
+            ale-my-eyes-android/ale-my-eyes-arm64.apk
+            ale-my-eyes-android/ale-my-eyes-armv7.apk

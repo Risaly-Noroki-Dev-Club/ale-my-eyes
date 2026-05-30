@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 /// 云端API配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CloudApiConfig {
     pub provider: String,
     pub api_key: String,
@@ -28,6 +29,7 @@ impl Default for CloudApiConfig {
 
 /// 模型配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ModelsConfig {
     pub auto_download: bool,
     pub max_download_size: u64,
@@ -50,6 +52,7 @@ impl Default for ModelsConfig {
 
 /// 推理配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InferenceConfig {
     pub mode: String, // "local", "cloud", "adaptive"
     pub prefer_cloud: bool,
@@ -70,6 +73,7 @@ impl Default for InferenceConfig {
 
 /// 音频配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AudioConfig {
     pub sample_rate: u32,
     pub channels: u16,
@@ -92,6 +96,7 @@ impl Default for AudioConfig {
 
 /// 界面配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UiConfig {
     pub language: String,
     pub theme: String,
@@ -116,6 +121,7 @@ impl Default for UiConfig {
 
 /// 应用配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AppConfig {
     pub cloud_api: CloudApiConfig,
     pub models: ModelsConfig,
@@ -148,6 +154,7 @@ impl ConfigManager {
 
         let content = std::fs::read_to_string(&self.config_path)?;
         self.config = serde_json::from_str(&content)?;
+        self.save()?;
         Ok(())
     }
 
@@ -493,5 +500,74 @@ mod tests {
         assert_eq!(manager.config().cloud_api.provider, "openai");
         assert!(path.exists());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_config_manager_loads_legacy_ui_without_auto_speak() {
+        let dir = std::path::PathBuf::from("/tmp/ale-my-eyes-test-legacy-ui");
+        let path = dir.join("config.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &path,
+            r#"{
+  "cloud_api": {
+    "provider": "openai",
+    "api_key": "sk-test",
+    "api_url": "https://api.openai.com/v1",
+    "model": "gpt-4o",
+    "max_tokens": 1024,
+    "timeout": 30
+  },
+  "models": {
+    "auto_download": true,
+    "max_download_size": 524288000,
+    "preferred_quality": "balanced",
+    "offline_mode": false,
+    "models_dir": "models"
+  },
+  "inference": {
+    "mode": "adaptive",
+    "prefer_cloud": true,
+    "timeout": 30,
+    "fallback_to_local": true
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "buffer_size": 4096,
+    "voice": "default",
+    "speed": 1.0
+  },
+  "ui": {
+    "language": "zh-CN",
+    "theme": "system",
+    "font_size": 16,
+    "high_contrast": false,
+    "screen_reader": true
+  }
+}"#,
+        )
+        .unwrap();
+
+        let mut manager = ConfigManager::new(&path);
+        manager.load().unwrap();
+
+        assert!(manager.config().ui.auto_speak);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("auto_speak"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_config_missing_sections_use_defaults() {
+        let config: AppConfig =
+            serde_json::from_str(r#"{"cloud_api":{"api_key":"sk-test"}}"#).unwrap();
+
+        assert_eq!(config.cloud_api.api_key, "sk-test");
+        assert_eq!(config.cloud_api.provider, "openai");
+        assert_eq!(config.inference.mode, "adaptive");
+        assert_eq!(config.audio.sample_rate, 16000);
+        assert!(config.ui.auto_speak);
     }
 }

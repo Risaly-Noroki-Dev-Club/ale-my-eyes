@@ -90,17 +90,26 @@ PACKAGE_DIR="ale-my-eyes-android"
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR"
 
-BUILD_TARGETS=("${ANDROID_BUILD_TARGETS:-aarch64-linux-android}")
+BUILD_TARGETS=(${ANDROID_BUILD_TARGETS:-aarch64-linux-android armv7-linux-androideabi})
 
 build_target() {
     local target="$1"
     local output_name="$2"
 
+    rm -f target/release/apk/*.apk "target/$target/release/apk"/*.apk 2>/dev/null || true
+
     log_info "构建 ${target}..."
     cargo apk build -p ale-gui --target "$target" --lib --release
 
-    local apk_path
-    apk_path=$(find target/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+    local apk_path=""
+    if [ -f "target/release/apk/ale-gui.apk" ]; then
+        apk_path="target/release/apk/ale-gui.apk"
+    elif [ -d "target/$target/release/apk" ]; then
+        apk_path=$(find "target/$target/release/apk" -maxdepth 1 -name "*.apk" | sort | tail -n 1)
+    fi
+    if [ -z "$apk_path" ] && [ -d "target/release/apk" ]; then
+        apk_path=$(find "target/release/apk" -maxdepth 1 -name "*.apk" | sort | tail -n 1)
+    fi
     if [ -z "$apk_path" ] || [ ! -f "$apk_path" ]; then
         log_error "未找到 ${target} 构建产物 APK"
         exit 1

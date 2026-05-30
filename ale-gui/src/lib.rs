@@ -93,36 +93,7 @@ pub fn setup_app(app: &AppWindow) {
                     app.set_status_text("就绪".into());
                     app.set_status_type("ready".into());
 
-                    // Desktop: start screen capture + automation
-                    #[cfg(not(target_os = "android"))]
-                    {
-                        let sc = screen_capture::ScreenCapture::new(
-                            screen_capture::CaptureConfig::default(),
-                        );
-                        if let Err(e) = sc.start() {
-                            tracing::warn!("Screen capture failed to start: {}", e);
-                        } else {
-                            st.screen_capture = Some(sc);
-                        }
-
-                        match automation::AutomationEngine::new(
-                            automation::AutomationConfig::default(),
-                        ) {
-                            Ok(ae) => st.automation = Some(ae),
-                            Err(e) => tracing::warn!("Automation engine failed: {}", e),
-                        }
-                    }
-
-                    // Android: start camera
-                    #[cfg(target_os = "android")]
-                    {
-                        let cam = camera::AndroidCamera::new(camera::CameraConfig::default());
-                        if let Err(e) = cam.start() {
-                            tracing::warn!("Camera failed to start: {}", e);
-                        } else {
-                            st.camera = Some(cam);
-                        }
-                    }
+                    initialize_platform_services(&mut st);
 
                     // Auto-start continuous listening
                     start_continuous_listening(&mut st, &app);
@@ -652,6 +623,33 @@ pub fn setup_app(app: &AppWindow) {
             })
             .unwrap();
         });
+    }
+}
+
+fn initialize_platform_services(st: &mut AppState) {
+    #[cfg(not(target_os = "android"))]
+    {
+        let sc = screen_capture::ScreenCapture::new(screen_capture::CaptureConfig::default());
+        if let Err(e) = sc.start() {
+            tracing::warn!("Screen capture failed to start: {}", e);
+        } else {
+            st.screen_capture = Some(sc);
+        }
+
+        match automation::AutomationEngine::new(automation::AutomationConfig::default()) {
+            Ok(ae) => st.automation = Some(ae),
+            Err(e) => tracing::warn!("Automation engine failed: {}", e),
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        let cam = camera::AndroidCamera::new(camera::CameraConfig::default());
+        if let Err(e) = cam.start() {
+            tracing::warn!("Camera failed to start: {}", e);
+        } else {
+            st.camera = Some(cam);
+        }
     }
 }
 

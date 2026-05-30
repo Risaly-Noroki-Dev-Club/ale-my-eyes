@@ -152,13 +152,14 @@ jobs:
           export ANDROID_HOME="${ANDROID_SDK_ROOT}"
           export ANDROID_NDK_ROOT="${ANDROID_SDK_ROOT}/ndk/25.2.9519653"
           ./scripts/package-android.sh
-          cp ale-my-eyes-android/ale-my-eyes-arm64.apk ale-my-eyes-android.apk
 
-      - name: Upload Android apk
+      - name: Upload Android apks
         uses: actions/upload-artifact@v4
         with:
           name: ale-my-eyes-android
-          path: ale-my-eyes-android.apk
+          path: |
+            ale-my-eyes-android/ale-my-eyes-arm64.apk
+            ale-my-eyes-android/ale-my-eyes-armv7.apk
 
   release:
     name: Publish GitHub release
@@ -181,6 +182,7 @@ jobs:
           files: |
             artifacts/ale-my-eyes-windows/ale-my-eyes-windows.exe
             artifacts/ale-my-eyes-linux/ale-my-eyes_0.1.0_amd64.deb
-            artifacts/ale-my-eyes-android/ale-my-eyes-android.apk
+            artifacts/ale-my-eyes-android/ale-my-eyes-arm64.apk
+            artifacts/ale-my-eyes-android/ale-my-eyes-armv7.apk
           draft: false
           prerelease: false
