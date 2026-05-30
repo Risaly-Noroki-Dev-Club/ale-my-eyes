@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 
 #[cfg(target_os = "android")]
-use oboe::{AudioInputCallback, AudioInputStream, DataCallbackResult, Mono};
+use oboe::{AudioInputCallback, AudioInputStreamSafe, DataCallbackResult, Mono};
 
 pub struct Recorder {
     #[cfg(not(target_os = "android"))]
@@ -123,6 +123,7 @@ impl Recorder {
         let samples_clone = samples.clone();
 
         let stream = AudioStreamBuilder::default()
+            .set_input()
             .set_performance_mode(PerformanceMode::LowLatency)
             .set_sharing_mode(SharingMode::Shared)
             .set_format::<f32>()
@@ -160,7 +161,7 @@ impl AudioInputCallback for RecorderCallback {
 
     fn on_audio_ready(
         &mut self,
-        _stream: &mut dyn AudioInputStream,
+        _stream: &mut dyn AudioInputStreamSafe,
         frames: &[f32],
     ) -> DataCallbackResult {
         if let Ok(mut buffer) = self.samples.lock() {

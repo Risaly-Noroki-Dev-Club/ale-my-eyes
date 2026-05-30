@@ -53,9 +53,16 @@ async fn pick_image_android() -> Result<(Vec<u8>, String), String> {
     let action = env
         .get_static_field(intent_class, "ACTION_GET_CONTENT", "Ljava/lang/String;")
         .map_err(|error| format!("获取 ACTION_GET_CONTENT 失败: {error}"))?;
+    let action = action
+        .l()
+        .map_err(|error| format!("读取 action 失败: {error}"))?;
 
     let intent = env
-        .new_object(intent_class, "(Ljava/lang/String;)V", &[action])
+        .new_object(
+            intent_class,
+            "(Ljava/lang/String;)V",
+            &[jni::objects::JValue::Object(&action)],
+        )
         .map_err(|error| format!("创建 Intent 失败: {error}"))?;
 
     let mime_type = env
@@ -78,7 +85,7 @@ async fn pick_image_android() -> Result<(Vec<u8>, String), String> {
         "startActivityForResult",
         "(Landroid/content/Intent;I)V",
         &[
-            jni::objects::JValue::Object(intent),
+            jni::objects::JValue::Object(&intent),
             jni::objects::JValue::Int(1001),
         ],
     )

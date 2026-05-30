@@ -1,4 +1,5 @@
 use crate::AppWindow;
+use slint::ComponentHandle;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

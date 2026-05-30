@@ -282,6 +282,8 @@ pub fn setup_app(app: &AppWindow) {
                                     let ctx = eng.context_mut();
                                     ctx.add_tokens(response.tokens_used);
                                     app.set_session_tokens(ctx.session_tokens() as i32);
+                                    let _ =
+                                        eng.learn_from_interaction(&question, &response.content);
                                 }
 
                                 // Parse tool calls
@@ -406,6 +408,7 @@ pub fn setup_app(app: &AppWindow) {
                                 let ctx = eng.context_mut();
                                 ctx.add_tokens(response.tokens_used);
                                 app.set_session_tokens(ctx.session_tokens() as i32);
+                                let _ = eng.learn_from_interaction(&question, &response.content);
                             }
 
                             app.set_status_text("就绪".into());
@@ -449,6 +452,7 @@ pub fn setup_app(app: &AppWindow) {
             slint::spawn_local(async move {
                 let mut st = state.lock().await;
                 if let Some(plan) = st.pending_plan.take() {
+                    #[cfg(not(target_os = "android"))]
                     if let Some(ref mut ae) = st.automation {
                         match ae.execute_plan(&plan) {
                             Ok(result) => {
@@ -465,6 +469,15 @@ pub fn setup_app(app: &AppWindow) {
                                 app.set_status_text(slint::format!("执行失败: {}", e));
                             }
                         }
+                    }
+                    #[cfg(target_os = "android")]
+                    {
+                        let app = app_weak.unwrap();
+                        app.set_show_confirmation(false);
+                        app.set_status_text(slint::format!(
+                            "Android 暂不支持执行 {} 个桌面自动化动作",
+                            plan.actions.len()
+                        ));
                     }
                 }
             })
