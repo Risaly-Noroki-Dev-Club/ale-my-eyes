@@ -1,92 +1,129 @@
 #!/bin/bash
-# Ale, My Eyes! Android 打包脚本 (Slint 版本)
-# 用法: ./scripts/package-android.sh
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}开始打包 Ale, My Eyes! Android 版本...${NC}"
+log_info() {
+    printf "%b%s%b\n" "$GREEN" "$1" "$NC"
+}
+
+log_warn() {
+    printf "%b%s%b\n" "$YELLOW" "$1" "$NC"
+}
+
+log_error() {
+    printf "%b%s%b\n" "$RED" "$1" "$NC" >&2
+}
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        log_error "未找到命令: $1"
+        exit 1
+    fi
+}
 
 if [ ! -f "Cargo.toml" ]; then
-    echo -e "${RED}错误: 请在项目根目录运行此脚本${NC}"
+    log_error "请在项目根目录运行此脚本"
     exit 1
 fi
 
-if ! command -v rustup &> /dev/null; then
-    echo -e "${RED}错误: 未找到 rustup，请先安装 Rust${NC}"
+require_command rustup
+require_command cargo
+require_command keytool
+require_command find
+
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+if [ ! -d "$ANDROID_SDK_ROOT" ]; then
+    log_error "Android SDK 目录不存在: $ANDROID_SDK_ROOT"
+    log_error "请设置 ANDROID_SDK_ROOT 或 ANDROID_HOME"
     exit 1
 fi
 
-# Install cargo-apk if missing
-if ! command -v cargo-apk &> /dev/null; then
-    echo -e "${YELLOW}安装 cargo-apk...${NC}"
+export ANDROID_SDK_ROOT
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
+
+if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+    NDK_ROOT="$ANDROID_NDK_ROOT"
+elif [ -d "$ANDROID_SDK_ROOT/ndk/25.2.9519653" ]; then
+    NDK_ROOT="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+else
+    log_error "未找到 Android NDK 25.2.9519653"
+    log_error "请安装 NDK 并设置 ANDROID_NDK_ROOT，或放在 $ANDROID_SDK_ROOT/ndk/25.2.9519653"
+    exit 1
+fi
+
+export ANDROID_NDK_ROOT="$NDK_ROOT"
+
+if ! cargo apk --version >/dev/null 2>&1; then
+    log_info "安装 cargo-apk..."
     cargo install cargo-apk
 fi
 
-# Check Android NDK
-if [ -z "$ANDROID_NDK_ROOT" ]; then
-    echo -e "${RED}错误: 未设置 ANDROID_NDK_ROOT 环境变量${NC}"
-    echo -e "${YELLOW}请安装 Android NDK 并设置环境变量：${NC}"
-    echo -e "export ANDROID_NDK_ROOT=/path/to/android-ndk"
-    exit 1
+log_info "添加 Android Rust targets..."
+rustup target add aarch64-linux-android armv7-linux-androideabi
+
+KEYSTORE_PATH="${CARGO_APK_RELEASE_KEYSTORE:-${RUNNER_TEMP:-/tmp}/ale-my-eyes-android-release.keystore}"
+KEYSTORE_PASSWORD="${CARGO_APK_RELEASE_KEYSTORE_PASSWORD:-android}"
+
+if [ ! -f "$KEYSTORE_PATH" ]; then
+    log_info "生成临时 Android 签名 keystore..."
+    keytool -genkeypair -v \
+        -storetype PKCS12 \
+        -keystore "$KEYSTORE_PATH" \
+        -storepass "$KEYSTORE_PASSWORD" \
+        -alias androiddebugkey \
+        -keypass "$KEYSTORE_PASSWORD" \
+        -keyalg RSA \
+        -keysize 2048 \
+        -validity 10000 \
+        -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
 fi
 
-ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
-export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+export CARGO_APK_RELEASE_KEYSTORE="$KEYSTORE_PATH"
+export CARGO_APK_RELEASE_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD"
 
-# Add Android targets
-echo -e "${YELLOW}添加 Android 目标...${NC}"
-rustup target add aarch64-linux-android
-rustup target add armv7-linux-androideabi
-
-# Build arm64 release APK
-echo -e "${GREEN}构建 arm64 版本...${NC}"
-cargo apk build -p ale-gui --target aarch64-linux-android --lib --release 2>&1
-
-# Build armv7 release APK
-echo -e "${GREEN}构建 armv7 版本...${NC}"
-cargo apk build -p ale-gui --target armv7-linux-androideabi --lib --release 2>&1
-
-# Copy APKs to output directory
 PACKAGE_DIR="ale-my-eyes-android"
-echo -e "${YELLOW}创建输出目录: ${PACKAGE_DIR}${NC}"
-rm -rf "${PACKAGE_DIR}"
-mkdir -p "${PACKAGE_DIR}"
+rm -rf "$PACKAGE_DIR"
+mkdir -p "$PACKAGE_DIR"
 
-APK_ARM64=$(find target/aarch64-linux-android/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
-APK_ARMV7=$(find target/armv7-linux-androideabi/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+build_target() {
+    local target="$1"
+    local output_name="$2"
 
-if [ -n "$APK_ARM64" ] && [ -f "$APK_ARM64" ]; then
-    cp "$APK_ARM64" "${PACKAGE_DIR}/ale-my-eyes-arm64.apk"
-    echo -e "${GREEN}arm64 APK: ${PACKAGE_DIR}/ale-my-eyes-arm64.apk${NC}"
-fi
+    log_info "构建 ${target}..."
+    cargo apk build -p ale-gui --target "$target" --lib --release
 
-if [ -n "$APK_ARMV7" ] && [ -f "$APK_ARMV7" ]; then
-    cp "$APK_ARMV7" "${PACKAGE_DIR}/ale-my-eyes-armv7.apk"
-    echo -e "${GREEN}armv7 APK: ${PACKAGE_DIR}/ale-my-eyes-armv7.apk${NC}"
-fi
+    local apk_path
+    apk_path=$(find target/release/apk -maxdepth 1 -name '*.apk' | head -n 1)
+    if [ -z "$apk_path" ] || [ ! -f "$apk_path" ]; then
+        log_error "未找到 ${target} 构建产物 APK"
+        exit 1
+    fi
 
-# Create archive
-echo -e "${YELLOW}创建压缩包...${NC}"
-if command -v zip &> /dev/null; then
-    zip -r "ale-my-eyes-android.zip" "${PACKAGE_DIR}"
-elif command -v tar &> /dev/null; then
-    tar -czf "ale-my-eyes-android.tar.gz" "${PACKAGE_DIR}"
+    cp "$apk_path" "$PACKAGE_DIR/$output_name"
+    log_info "已生成: $PACKAGE_DIR/$output_name"
+}
+
+build_target aarch64-linux-android ale-my-eyes-arm64.apk
+build_target armv7-linux-androideabi ale-my-eyes-armv7.apk
+
+if command -v zip >/dev/null 2>&1; then
+    log_info "创建 zip 压缩包..."
+    rm -f ale-my-eyes-android.zip
+    zip -rq ale-my-eyes-android.zip "$PACKAGE_DIR"
+elif command -v tar >/dev/null 2>&1; then
+    log_info "创建 tar.gz 压缩包..."
+    rm -f ale-my-eyes-android.tar.gz
+    tar -czf ale-my-eyes-android.tar.gz "$PACKAGE_DIR"
 else
-    echo -e "${YELLOW}警告: 未找到 zip 或 tar，跳过压缩包创建${NC}"
+    log_warn "未找到 zip 或 tar，跳过压缩包创建"
 fi
 
-echo -e "${GREEN}打包完成！${NC}"
-echo -e "${GREEN}输出目录: ${PACKAGE_DIR}${NC}"
-if [ -f "ale-my-eyes-android.zip" ]; then
-    echo -e "${GREEN}压缩包: ale-my-eyes-android.zip${NC}"
-fi
-
-echo -e "${YELLOW}下一步：${NC}"
-echo -e "1. 将 APK 传输到 Android 设备"
-echo -e "2. 在设备上安装 APK（需要允许未知来源）"
-echo -e "3. 或使用 adb install: adb install ${PACKAGE_DIR}/ale-my-eyes-arm64.apk"
+log_info "Android 打包完成"
+printf "输出目录: %s\n" "$PACKAGE_DIR"
+printf "arm64 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-arm64.apk"
+printf "armv7 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-armv7.apk"
