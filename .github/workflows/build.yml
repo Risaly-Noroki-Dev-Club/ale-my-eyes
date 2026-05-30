@@ -145,6 +145,7 @@ jobs:
           ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
           export ANDROID_HOME="${ANDROID_SDK_ROOT}"
           "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-30"
           "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34"
           yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses
 
