@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   build-android:
+    env:
+      ANDROID_NDK_VERSION: 27.3.13750724
     name: Build Android package
     runs-on: ubuntu-latest
     steps:
@@ -32,15 +34,15 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "ndk;25.2.9519653"
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-30"
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "ndk;${ANDROID_NDK_VERSION}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34"
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses
 
       - name: Build Android APK
         run: |
-          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/25.2.9519653"
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_NDK_VERSION="${ANDROID_NDK_VERSION}"
           ./scripts/package-android.sh
 
       - name: Upload Android apks
