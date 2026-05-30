@@ -43,7 +43,6 @@ slint-build = "1.16"
 [package.metadata.android]
 package = "com.alemyeyes"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
-version_code = 1
 
 [package.metadata.android.sdk]
 min_sdk_version = 26
