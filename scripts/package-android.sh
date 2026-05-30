@@ -90,6 +90,8 @@ PACKAGE_DIR="ale-my-eyes-android"
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR"
 
+BUILD_TARGETS=("${ANDROID_BUILD_TARGETS:-aarch64-linux-android}")
+
 build_target() {
     local target="$1"
     local output_name="$2"
@@ -108,8 +110,20 @@ build_target() {
     log_info "已生成: $PACKAGE_DIR/$output_name"
 }
 
-build_target aarch64-linux-android ale-my-eyes-arm64.apk
-build_target armv7-linux-androideabi ale-my-eyes-armv7.apk
+for target in "${BUILD_TARGETS[@]}"; do
+    case "$target" in
+        aarch64-linux-android)
+            build_target "$target" ale-my-eyes-arm64.apk
+            ;;
+        armv7-linux-androideabi)
+            build_target "$target" ale-my-eyes-armv7.apk
+            ;;
+        *)
+            log_error "不支持的 Android target: $target"
+            exit 1
+            ;;
+    esac
+done
 
 if command -v zip >/dev/null 2>&1; then
     log_info "创建 zip 压缩包..."
@@ -125,5 +139,9 @@ fi
 
 log_info "Android 打包完成"
 printf "输出目录: %s\n" "$PACKAGE_DIR"
-printf "arm64 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-arm64.apk"
-printf "armv7 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-armv7.apk"
+if [ -f "$PACKAGE_DIR/ale-my-eyes-arm64.apk" ]; then
+    printf "arm64 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-arm64.apk"
+fi
+if [ -f "$PACKAGE_DIR/ale-my-eyes-armv7.apk" ]; then
+    printf "armv7 APK: %s/%s\n" "$PACKAGE_DIR" "ale-my-eyes-armv7.apk"
+fi
