@@ -146,6 +146,14 @@ impl RemoteLlm {
         let client = reqwest::Client::new();
         Ok(Self { config, client })
     }
+
+    fn response_text(response_body: &serde_json::Value) -> Result<String> {
+        response_body["choices"][0]["message"]["content"]
+            .as_str()
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| AleError::Other(anyhow::anyhow!("Missing LLM response content")))
+    }
 }
 
 #[async_trait]
@@ -208,10 +216,7 @@ impl LanguageModel for RemoteLlm {
             .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to parse response: {}", e)))?;
 
         // 提取响应文本
-        let text = response_body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let text = Self::response_text(&response_body)?;
 
         let tokens_used = response_body["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize;
 
@@ -236,6 +241,29 @@ impl LanguageModel for RemoteLlm {
             device: "remote".to_string(),
             loaded: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_response_text_rejects_missing_content() {
+        let response = serde_json::json!({"choices": [{"message": {}}]});
+        assert!(RemoteLlm::response_text(&response).is_err());
+    }
+
+    #[test]
+    fn test_response_text_rejects_empty_content() {
+        let response = serde_json::json!({"choices": [{"message": {"content": "  "}}]});
+        assert!(RemoteLlm::response_text(&response).is_err());
+    }
+
+    #[test]
+    fn test_response_text_accepts_content() {
+        let response = serde_json::json!({"choices": [{"message": {"content": "hello"}}]});
+        assert_eq!(RemoteLlm::response_text(&response).unwrap(), "hello");
     }
 }
 
