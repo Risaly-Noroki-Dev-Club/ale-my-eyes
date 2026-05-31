@@ -316,7 +316,22 @@ fn safe_application_name(name: &str) -> Result<&str> {
 
 /// 打开 URL
 fn open_url(url: &str) -> Result<()> {
+    let url = safe_url(url)?;
     open::that(url).map_err(|e| AleError::Other(anyhow::anyhow!("Failed to open URL: {}", e)))
+}
+
+fn safe_url(url: &str) -> Result<&str> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(AleError::Other(anyhow::anyhow!("URL cannot be empty")));
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Only http:// and https:// URLs are allowed"
+        )));
+    }
+
+    Ok(url)
 }
 
 /// 执行文件操作
@@ -444,6 +459,26 @@ mod tests {
         assert!(safe_application_name("../evil").is_err());
         assert!(safe_application_name("calc && rm -rf ~").is_err());
         assert!(safe_application_name("app\"name").is_err());
+    }
+
+    #[test]
+    fn test_safe_url_accepts_http_urls() {
+        assert_eq!(
+            safe_url("https://example.com").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            safe_url("http://example.com").unwrap(),
+            "http://example.com"
+        );
+    }
+
+    #[test]
+    fn test_safe_url_rejects_unsafe_schemes() {
+        assert!(safe_url("").is_err());
+        assert!(safe_url("file:///etc/passwd").is_err());
+        assert!(safe_url("javascript:alert(1)").is_err());
+        assert!(safe_url("mailto:test@example.com").is_err());
     }
 
     #[test]
