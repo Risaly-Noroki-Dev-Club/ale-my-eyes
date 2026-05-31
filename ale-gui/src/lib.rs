@@ -324,21 +324,29 @@ pub fn setup_app(app: &AppWindow) {
                 let mut st = state.lock().await;
                 if let Some(plan) = st.pending_plan.take() {
                     #[cfg(not(target_os = "android"))]
-                    if let Some(ref mut ae) = st.automation {
-                        match ae.execute_plan(&plan) {
-                            Ok(result) => {
-                                let app = app_weak.unwrap();
-                                app.set_show_confirmation(false);
-                                app.set_status_text(slint::format!(
-                                    "执行完成: {} 步",
-                                    result.actions_executed
-                                ));
+                    {
+                        if let Some(ref mut ae) = st.automation {
+                            match ae.execute_plan(&plan) {
+                                Ok(result) => {
+                                    let app = app_weak.unwrap();
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!(
+                                        "执行完成: {} 步",
+                                        result.actions_executed
+                                    ));
+                                }
+                                Err(e) => {
+                                    let app = app_weak.unwrap();
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!("执行失败: {}", e));
+                                    app.set_status_type("error".into());
+                                }
                             }
-                            Err(e) => {
-                                let app = app_weak.unwrap();
-                                app.set_show_confirmation(false);
-                                app.set_status_text(slint::format!("执行失败: {}", e));
-                            }
+                        } else {
+                            let app = app_weak.unwrap();
+                            app.set_show_confirmation(false);
+                            app.set_status_text("自动化引擎不可用".into());
+                            app.set_status_type("error".into());
                         }
                     }
                     #[cfg(target_os = "android")]
@@ -459,7 +467,10 @@ pub fn setup_app(app: &AppWindow) {
 
                 let Some(engine) = engine else { return };
                 let app = app_weak.unwrap();
-                let config = config_from_app(&app);
+                let config = {
+                    let engine = engine.lock().await;
+                    config_from_app(&app, engine.config())
+                };
 
                 app.set_is_busy(true);
 
@@ -578,8 +589,8 @@ fn apply_config_to_app(app: &AppWindow, config: &AppConfig) {
     app.set_auto_speak(config.ui.auto_speak);
 }
 
-fn config_from_app(app: &AppWindow) -> AppConfig {
-    let mut config = AppConfig::default();
+fn config_from_app(app: &AppWindow, base: &AppConfig) -> AppConfig {
+    let mut config = base.clone();
     config.cloud_api.provider = app.get_provider().to_string();
     config.cloud_api.api_key = app.get_api_key().to_string();
     config.cloud_api.api_url = app

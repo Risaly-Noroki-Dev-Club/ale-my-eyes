@@ -51,7 +51,9 @@ pub async fn handle_question_response(
                 let text = reply.content;
                 slint::spawn_local(async move {
                     let _ = speak_and_play(engine, &text).await;
-                    let app = app_weak.unwrap();
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
                     app.set_status_text("就绪".into());
                     app.set_status_type("ready".into());
                 })
