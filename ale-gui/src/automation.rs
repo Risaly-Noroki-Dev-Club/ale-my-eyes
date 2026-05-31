@@ -227,19 +227,17 @@ fn parse_key(name: &str) -> Key {
 
 /// 打开应用程序
 fn open_application(name: &str) -> Result<()> {
+    let name = safe_application_name(name)?;
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("sh")
-            .args(["-c", &format!("{} &", name)])
-            .spawn()
-            .map_err(|e| {
-                AleError::Other(anyhow::anyhow!("Failed to open app '{}': {}", name, e))
-            })?;
+        std::process::Command::new(name).spawn().map_err(|e| {
+            AleError::Other(anyhow::anyhow!("Failed to open app '{}': {}", name, e))
+        })?;
     }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
-            .args(["/C", "start", name])
+            .args(["/C", "start", "", name])
             .spawn()
             .map_err(|e| {
                 AleError::Other(anyhow::anyhow!("Failed to open app '{}': {}", name, e))
@@ -259,10 +257,11 @@ fn open_application(name: &str) -> Result<()> {
 
 /// 关闭应用程序
 fn close_application(name: &str) -> Result<()> {
+    let name = safe_application_name(name)?;
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("pkill")
-            .args(["-f", name])
+            .args(["-x", name])
             .spawn()
             .map_err(|e| {
                 AleError::Other(anyhow::anyhow!("Failed to close app '{}': {}", name, e))
@@ -287,6 +286,32 @@ fn close_application(name: &str) -> Result<()> {
             })?;
     }
     Ok(())
+}
+
+fn safe_application_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Application name cannot be empty"
+        )));
+    }
+
+    if name.contains('/') || name.contains('\\') {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Application name cannot contain path separators"
+        )));
+    }
+
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '.' | '_' | '-'))
+    {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Application name contains unsafe characters"
+        )));
+    }
+
+    Ok(name)
 }
 
 /// 打开 URL
@@ -398,6 +423,27 @@ mod tests {
         let config = AutomationConfig::default();
         assert!(config.require_confirmation);
         assert_eq!(config.action_delay_ms, 100);
+    }
+
+    #[test]
+    fn test_safe_application_name_accepts_common_names() {
+        assert_eq!(safe_application_name("notepad").unwrap(), "notepad");
+        assert_eq!(
+            safe_application_name("Google Chrome").unwrap(),
+            "Google Chrome"
+        );
+        assert_eq!(
+            safe_application_name("code-insiders").unwrap(),
+            "code-insiders"
+        );
+    }
+
+    #[test]
+    fn test_safe_application_name_rejects_unsafe_names() {
+        assert!(safe_application_name("").is_err());
+        assert!(safe_application_name("../evil").is_err());
+        assert!(safe_application_name("calc && rm -rf ~").is_err());
+        assert!(safe_application_name("app\"name").is_err());
     }
 
     #[test]
