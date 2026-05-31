@@ -199,15 +199,7 @@ pub fn setup_app(app: &AppWindow) {
                         }
                         #[cfg(target_os = "android")]
                         {
-                            st.camera.as_ref().and_then(|cam| {
-                                cam.latest_frame().map(|f| {
-                                    image::RgbaImage::from_raw(f.width, f.height, f.rgba_data)
-                                        .map(|img| {
-                                            image::DynamicImage::ImageRgba8(img).to_rgb8().to_vec()
-                                        })
-                                        .unwrap_or_default()
-                                })
-                            })
+                            st.camera.as_ref().and_then(|cam| cam.latest_frame_jpeg(80))
                         }
                     };
 

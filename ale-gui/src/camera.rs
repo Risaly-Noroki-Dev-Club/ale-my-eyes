@@ -45,6 +45,26 @@ impl AndroidCamera {
 
     /// 打开相机并开始预览
     pub fn start(&self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            return Err(AleError::Other(anyhow::anyhow!(
+                "Android camera capture is not implemented yet"
+            )));
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            return Err(AleError::Other(anyhow::anyhow!(
+                "Camera only available on Android"
+            )));
+        }
+
+        #[allow(unreachable_code)]
+        self.start_impl()
+    }
+
+    #[allow(dead_code)]
+    fn start_impl(&self) -> Result<()> {
         let mut running = self
             .running
             .lock()
@@ -71,6 +91,12 @@ impl AndroidCamera {
         Ok(())
     }
 
+    /// 获取最新帧的 JPEG 数据（用于发送给 API）
+    pub fn latest_frame_jpeg(&self, quality: u8) -> Option<Vec<u8>> {
+        let frame = self.latest_frame()?;
+        frame_to_jpeg(&frame, quality).ok()
+    }
+
     /// 停止相机
     pub fn stop(&self) {
         if let Ok(mut running) = self.running.lock() {
@@ -94,6 +120,20 @@ impl Drop for AndroidCamera {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn frame_to_jpeg(frame: &CameraFrame, quality: u8) -> Result<Vec<u8>> {
+    let img = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba_data.clone())
+        .ok_or_else(|| AleError::Other(anyhow::anyhow!("Failed to create image from frame")))?;
+    let rgb_img = image::DynamicImage::ImageRgba8(img).to_rgb8();
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+    rgb_img
+        .write_with_encoder(encoder)
+        .map_err(|e| AleError::Other(anyhow::anyhow!("JPEG encode failed: {}", e)))?;
+
+    Ok(buf.into_inner())
 }
 
 /// 初始化 Android 相机（通过 JNI）
