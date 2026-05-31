@@ -4,9 +4,20 @@ use slint::ComponentHandle;
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: slint::android::AndroidApp) {
-    slint::android::init(app).unwrap();
+    if let Err(error) = slint::android::init(app) {
+        tracing::error!("Failed to initialize Slint Android backend: {}", error);
+        return;
+    }
 
-    let window = AppWindow::new().unwrap();
+    let window = match AppWindow::new() {
+        Ok(window) => window,
+        Err(error) => {
+            tracing::error!("Failed to create Android app window: {}", error);
+            return;
+        }
+    };
     crate::setup_app(&window);
-    window.run().unwrap();
+    if let Err(error) = window.run() {
+        tracing::error!("Android app exited with error: {}", error);
+    }
 }
