@@ -20,6 +20,7 @@ use ale_core::config::AppConfig;
 use ale_core::vad::{VadState, VoiceActivityDetector};
 use ale_core::{AleEngine, AleEngineFactory};
 use conversation::handle_question_response;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
@@ -78,7 +79,7 @@ pub fn setup_app(app: &AppWindow) {
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
-        slint::spawn_local(async move {
+        spawn_local_task(async move {
             let result = create_engine().await;
             let mut st = state.lock().await;
             let Some(app) = app_weak.upgrade() else {
@@ -109,8 +110,7 @@ pub fn setup_app(app: &AppWindow) {
                     app.set_status_type("error".into());
                 }
             }
-        })
-        .unwrap();
+        });
     }
 
     // VAD timer — checks for speech end every 100ms
@@ -124,7 +124,7 @@ pub fn setup_app(app: &AppWindow) {
             move || {
                 let state = state.clone();
                 let app_weak = app_weak.clone();
-                slint::spawn_local(async move {
+                spawn_local_task(async move {
                     let mut st = state.lock().await;
                     if !st.vad_active || st.recorder.is_none() {
                         return;
@@ -255,8 +255,7 @@ pub fn setup_app(app: &AppWindow) {
                     // Restart listening
                     let mut st = state.lock().await;
                     start_continuous_listening(&mut st, &app);
-                })
-                .unwrap();
+                });
             },
         );
     }
@@ -272,7 +271,7 @@ pub fn setup_app(app: &AppWindow) {
             }
             let state = state.clone();
             let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 let st = state.lock().await;
                 let engine = st.engine.clone();
                 let auto_speak = st.auto_speak;
@@ -314,8 +313,7 @@ pub fn setup_app(app: &AppWindow) {
                     return;
                 };
                 app.set_is_busy(false);
-            })
-            .unwrap();
+            });
         });
     }
 
@@ -326,7 +324,7 @@ pub fn setup_app(app: &AppWindow) {
         app.on_confirm_action(move || {
             let state = state.clone();
             let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 let mut st = state.lock().await;
                 if let Some(plan) = st.pending_plan.take() {
                     #[cfg(not(target_os = "android"))]
@@ -373,8 +371,7 @@ pub fn setup_app(app: &AppWindow) {
                         ));
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     }
 
@@ -397,7 +394,7 @@ pub fn setup_app(app: &AppWindow) {
         app.on_open_settings(move || {
             let state = state.clone();
             let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 let st = state.lock().await;
                 let Some(app) = app_weak.upgrade() else {
                     return;
@@ -407,8 +404,7 @@ pub fn setup_app(app: &AppWindow) {
                     apply_config_to_app(&app, eng.config());
                 }
                 app.set_show_settings(true);
-            })
-            .unwrap();
+            });
         });
     }
 
@@ -478,10 +474,9 @@ pub fn setup_app(app: &AppWindow) {
             };
             app.set_auto_speak(value);
             let state = state.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 state.lock().await.auto_speak = value;
-            })
-            .unwrap();
+            });
         });
     }
     {
@@ -501,7 +496,7 @@ pub fn setup_app(app: &AppWindow) {
         app.on_save_settings(move || {
             let state = state.clone();
             let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 let st = state.lock().await;
                 let engine = st.engine.clone();
                 drop(st);
@@ -537,8 +532,7 @@ pub fn setup_app(app: &AppWindow) {
                     }
                 }
                 app.set_is_busy(false);
-            })
-            .unwrap();
+            });
         });
     }
 
@@ -549,7 +543,7 @@ pub fn setup_app(app: &AppWindow) {
         app.on_test_connection(move || {
             let state = state.clone();
             let app_weak = app_weak.clone();
-            slint::spawn_local(async move {
+            spawn_local_task(async move {
                 let st = state.lock().await;
                 let engine = st.engine.clone();
                 drop(st);
@@ -580,9 +574,14 @@ pub fn setup_app(app: &AppWindow) {
                     }
                 }
                 app.set_is_busy(false);
-            })
-            .unwrap();
+            });
         });
+    }
+}
+
+fn spawn_local_task(future: impl Future<Output = ()> + 'static) {
+    if let Err(error) = slint::spawn_local(future) {
+        tracing::warn!("Failed to spawn UI task: {}", error);
     }
 }
 

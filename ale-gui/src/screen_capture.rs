@@ -69,13 +69,20 @@ impl ScreenCapture {
 
         thread::spawn(move || {
             while {
-                let r = running.lock().unwrap();
+                let Ok(r) = running.lock() else {
+                    tracing::warn!("Screen capture running flag lock poisoned");
+                    return;
+                };
                 *r
             } {
                 match capture_primary_monitor(scale) {
                     Ok(frame) => {
-                        let mut lf = latest_frame.lock().unwrap();
-                        *lf = Some(frame);
+                        if let Ok(mut lf) = latest_frame.lock() {
+                            *lf = Some(frame);
+                        } else {
+                            tracing::warn!("Screen capture frame lock poisoned");
+                            return;
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Screen capture failed: {}", e);

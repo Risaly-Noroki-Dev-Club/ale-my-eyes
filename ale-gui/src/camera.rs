@@ -145,7 +145,10 @@ fn init_camera(
     _height: u32,
 ) -> Result<()> {
     while {
-        let r = running.lock().unwrap();
+        let Ok(r) = running.lock() else {
+            tracing::warn!("Camera running flag lock poisoned");
+            return Ok(());
+        };
         *r
     } {
         // TODO: Wire Camera2/ImageReader callbacks here. Keep the worker alive for now.

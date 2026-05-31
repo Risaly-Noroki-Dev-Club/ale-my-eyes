@@ -2,6 +2,7 @@ use crate::{tts_player, AppState, AppWindow};
 use ale_core::actions::parse_action_plan_arguments;
 use ale_core::cloud::ToolCall;
 use ale_core::AleEngine;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -49,15 +50,14 @@ pub async fn handle_question_response(
             if auto_speak && !reply.content.is_empty() {
                 let app_weak = app_weak.clone();
                 let text = reply.content;
-                slint::spawn_local(async move {
+                spawn_local_task(async move {
                     let _ = speak_and_play(engine, &text).await;
                     let Some(app) = app_weak.upgrade() else {
                         return;
                     };
                     app.set_status_text("就绪".into());
                     app.set_status_type("ready".into());
-                })
-                .unwrap();
+                });
             }
         }
         Err(error) => {
@@ -65,6 +65,12 @@ pub async fn handle_question_response(
             app.set_status_text("就绪".into());
             app.set_status_type("ready".into());
         }
+    }
+}
+
+fn spawn_local_task(future: impl Future<Output = ()> + 'static) {
+    if let Err(error) = slint::spawn_local(future) {
+        tracing::warn!("Failed to spawn UI task: {}", error);
     }
 }
 

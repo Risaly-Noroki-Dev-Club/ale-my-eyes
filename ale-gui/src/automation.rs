@@ -213,8 +213,10 @@ fn parse_key(name: &str) -> Key {
         _ => {
             // 单字符按键
             if name.len() == 1 {
-                let ch = name.chars().next().unwrap();
-                Key::Unicode(ch)
+                name.chars()
+                    .next()
+                    .map(Key::Unicode)
+                    .unwrap_or(Key::Unicode('?'))
             } else {
                 Key::Unicode('?')
             }
