@@ -1,6 +1,7 @@
 use ale_core::actions::{Action, ActionPlan, FileOp, MouseButton};
 use ale_core::{AleError, Result};
 use enigo::{Button as EnigoButton, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use std::path::{Component, Path, PathBuf};
 
 /// 自动化引擎配置
 #[derive(Debug, Clone)]
@@ -295,38 +296,89 @@ fn open_url(url: &str) -> Result<()> {
 
 /// 执行文件操作
 fn execute_file_op(op: FileOp, path: &str, target: Option<&str>) -> Result<()> {
+    let path = safe_automation_path(path)?;
     match op {
         FileOp::Create => {
-            if path.ends_with('/') || path.ends_with('\\') {
-                std::fs::create_dir_all(path)?;
+            if path.to_string_lossy().ends_with('/') || path.to_string_lossy().ends_with('\\') {
+                std::fs::create_dir_all(&path)?;
             } else {
-                std::fs::write(path, "")?;
+                std::fs::write(&path, "")?;
             }
         }
         FileOp::Delete => {
-            if std::path::Path::new(path).is_dir() {
-                std::fs::remove_dir_all(path)?;
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path)?;
             } else {
-                std::fs::remove_file(path)?;
+                std::fs::remove_file(&path)?;
             }
         }
         FileOp::Move | FileOp::Copy => {
             let target = target.ok_or_else(|| {
                 AleError::Other(anyhow::anyhow!("Move/Copy requires target path"))
             })?;
+            let target = safe_automation_path(target)?;
             if op == FileOp::Move {
-                std::fs::rename(path, target)?;
+                std::fs::rename(&path, &target)?;
             } else {
-                std::fs::copy(path, target)?;
+                std::fs::copy(&path, &target)?;
             }
         }
         FileOp::Rename => {
             let target = target
                 .ok_or_else(|| AleError::Other(anyhow::anyhow!("Rename requires new name")))?;
-            std::fs::rename(path, target)?;
+            let target = safe_automation_path(target)?;
+            std::fs::rename(&path, &target)?;
         }
     }
     Ok(())
+}
+
+fn safe_automation_path(path: &str) -> Result<PathBuf> {
+    if path.trim().is_empty() {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Automation file path cannot be empty"
+        )));
+    }
+
+    let path = Path::new(path);
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Automation file path cannot contain parent directory components"
+        )));
+    }
+
+    let home = home_dir().ok_or_else(|| {
+        AleError::Other(anyhow::anyhow!(
+            "Cannot determine home directory for file operation"
+        ))
+    })?;
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        home.join(path)
+    };
+
+    if candidate == home || !candidate.starts_with(&home) {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "Automation file operation is limited to user home directory"
+        )));
+    }
+
+    Ok(candidate)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
 }
 
 #[cfg(test)]
@@ -346,5 +398,27 @@ mod tests {
         let config = AutomationConfig::default();
         assert!(config.require_confirmation);
         assert_eq!(config.action_delay_ms, 100);
+    }
+
+    #[test]
+    fn test_safe_automation_path_rejects_empty() {
+        assert!(safe_automation_path("  ").is_err());
+    }
+
+    #[test]
+    fn test_safe_automation_path_rejects_home_root() {
+        let home = home_dir().unwrap();
+        assert!(safe_automation_path(&home.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn test_safe_automation_path_rejects_parent_dir() {
+        assert!(safe_automation_path("../outside.txt").is_err());
+    }
+
+    #[test]
+    fn test_safe_automation_path_allows_relative_path() {
+        let path = safe_automation_path("Documents/test.txt").unwrap();
+        assert!(path.starts_with(home_dir().unwrap()));
     }
 }
