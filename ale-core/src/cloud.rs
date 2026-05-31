@@ -123,6 +123,22 @@ impl OpenAIApi {
 
         Self { config, client }
     }
+
+    fn chat_content(response_body: &serde_json::Value) -> Result<String> {
+        response_body["choices"][0]["message"]["content"]
+            .as_str()
+            .filter(|content| !content.trim().is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| AleError::CloudApiError("Missing chat response content".to_string()))
+    }
+
+    fn transcription_text(response_body: &serde_json::Value) -> Result<String> {
+        response_body["text"]
+            .as_str()
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| AleError::CloudApiError("Missing transcription text".to_string()))
+    }
 }
 
 #[async_trait]
@@ -159,10 +175,7 @@ impl CloudApi for OpenAIApi {
             .await
             .map_err(|e| AleError::CloudApiError(format!("Parse error: {}", e)))?;
 
-        let content = response_body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let content = Self::chat_content(&response_body)?;
 
         let tokens_used = response_body["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize;
 
@@ -225,10 +238,7 @@ impl CloudApi for OpenAIApi {
             .await
             .map_err(|e| AleError::CloudApiError(format!("Parse error: {}", e)))?;
 
-        let content = response_body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let content = Self::chat_content(&response_body)?;
 
         let tokens_used = response_body["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize;
 
@@ -276,10 +286,7 @@ impl CloudApi for OpenAIApi {
             .await
             .map_err(|e| AleError::CloudApiError(format!("Parse error: {}", e)))?;
 
-        let text = response_body["text"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let text = Self::transcription_text(&response_body)?;
 
         Ok(CloudResponse {
             content: text,
@@ -355,8 +362,14 @@ impl CloudApi for OpenAIApi {
 
         let message = &response_body["choices"][0]["message"];
         let content = message["content"].as_str().unwrap_or_default().to_string();
+        let tool_calls = message["tool_calls"].as_array();
+        if content.trim().is_empty() && tool_calls.map(|calls| calls.is_empty()).unwrap_or(true) {
+            return Err(AleError::CloudApiError(
+                "Missing vision response content or tool calls".to_string(),
+            ));
+        }
 
-        let tool_calls = message["tool_calls"].as_array().map(|calls| {
+        let tool_calls = tool_calls.map(|calls| {
             calls
                 .iter()
                 .map(|tc| ToolCall {
@@ -490,5 +503,29 @@ mod tests {
             ..Default::default()
         };
         let _api = CloudApiFactory::create(config);
+    }
+
+    #[test]
+    fn test_chat_content_rejects_missing_content() {
+        let response = serde_json::json!({"choices": [{"message": {}}]});
+        assert!(OpenAIApi::chat_content(&response).is_err());
+    }
+
+    #[test]
+    fn test_chat_content_rejects_empty_content() {
+        let response = serde_json::json!({"choices": [{"message": {"content": "  "}}]});
+        assert!(OpenAIApi::chat_content(&response).is_err());
+    }
+
+    #[test]
+    fn test_chat_content_accepts_content() {
+        let response = serde_json::json!({"choices": [{"message": {"content": "hello"}}]});
+        assert_eq!(OpenAIApi::chat_content(&response).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_transcription_text_rejects_missing_text() {
+        let response = serde_json::json!({});
+        assert!(OpenAIApi::transcription_text(&response).is_err());
     }
 }
