@@ -163,6 +163,20 @@ impl AleEngine {
         }
     }
 
+    fn vision_question_with_context(&self, question: &str) -> String {
+        let messages = self.context_manager.build_messages(None, question);
+        let context = messages
+            .into_iter()
+            .map(|message| format!("[{}]\n{}", message.role, message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        format!(
+            "请结合随附图片和以下上下文回答。若用户要求执行操作，请使用可用工具生成操作计划。\n\n{}",
+            context
+        )
+    }
+
     /// 设置云端API
     pub async fn set_cloud_api(&mut self, api: Box<dyn cloud::CloudApi>) -> Result<()> {
         // 更新推理引擎
@@ -276,9 +290,10 @@ impl AleEngine {
         image_data: &[u8],
         question: &str,
     ) -> Result<cloud::VisionResponse> {
+        let question = self.vision_question_with_context(question);
         let result = self
             .inference_engine
-            .ask_about_image(image_data, question, None)
+            .ask_about_image(image_data, &question, None)
             .await?;
         Ok(result.data)
     }
@@ -301,9 +316,10 @@ impl AleEngine {
         question: &str,
         tools: Vec<serde_json::Value>,
     ) -> Result<cloud::VisionResponse> {
+        let question = self.vision_question_with_context(question);
         let result = self
             .inference_engine
-            .ask_about_image(image_data, question, Some(tools))
+            .ask_about_image(image_data, &question, Some(tools))
             .await?;
         Ok(result.data)
     }
