@@ -14,7 +14,8 @@ pub mod screen_capture;
 #[cfg(not(target_os = "android"))]
 pub mod automation;
 
-use ale_core::actions::ActionPlan;
+use ale_core::actions::{parse_action_plan, ActionPlan};
+use ale_core::cloud::ToolCall;
 use ale_core::config::AppConfig;
 use ale_core::vad::{VadState, VoiceActivityDetector};
 use ale_core::{AleEngine, AleEngineFactory};
@@ -235,83 +236,16 @@ pub fn setup_app(app: &AppWindow) {
                         }
                     };
 
-                    // If we have an image, ask about it
-                    if let Some(img) = image_data {
-                        app.set_status_text("分析画面...".into());
-                        let result = {
-                            let eng = engine.lock().await;
-                            eng.ask_about_image(&img, &question).await
-                        };
-
-                        match result {
-                            Ok(response) => {
-                                app.set_ai_response(response.content.clone().into());
-
-                                // Track tokens
-                                {
-                                    let mut eng = engine.lock().await;
-                                    let ctx = eng.context_mut();
-                                    ctx.add_tokens(response.tokens_used);
-                                    app.set_session_tokens(ctx.session_tokens() as i32);
-                                    let _ =
-                                        eng.learn_from_interaction(&question, &response.content);
-                                }
-
-                                // Parse tool calls
-                                if let Some(ref calls) = response.tool_calls {
-                                    if !calls.is_empty() {
-                                        let steps: Vec<String> = calls
-                                            .iter()
-                                            .map(|tc| {
-                                                format!(
-                                                    "{}: {}",
-                                                    tc.function.name, tc.function.arguments
-                                                )
-                                            })
-                                            .collect();
-                                        app.set_action_steps(steps.join("\n").into());
-                                    }
-                                }
-
-                                app.set_status_text("就绪".into());
-                                app.set_status_type("ready".into());
-
-                                if auto_speak {
-                                    let text = response.content.clone();
-                                    let engine = engine.clone();
-                                    let app_weak2 = app_weak.clone();
-                                    slint::spawn_local(async move {
-                                        let _ = speak_and_play(engine, &text).await;
-                                        let app = app_weak2.unwrap();
-                                        app.set_status_text("就绪".into());
-                                        app.set_status_type("ready".into());
-                                    })
-                                    .unwrap();
-                                }
-                            }
-                            Err(e) => {
-                                app.set_ai_response(slint::format!("分析失败: {}", e));
-                                app.set_status_text("就绪".into());
-                                app.set_status_type("ready".into());
-                            }
-                        }
-                    } else {
-                        app.set_ai_response("".into());
-                        app.set_status_text("就绪".into());
-                        app.set_status_type("ready".into());
-
-                        if auto_speak && !question.is_empty() {
-                            let engine = engine.clone();
-                            let app_weak2 = app_weak.clone();
-                            slint::spawn_local(async move {
-                                let _ = speak_and_play(engine, &question).await;
-                                let app = app_weak2.unwrap();
-                                app.set_status_text("就绪".into());
-                                app.set_status_type("ready".into());
-                            })
-                            .unwrap();
-                        }
-                    }
+                    handle_question_response(
+                        &state,
+                        &app,
+                        &app_weak,
+                        engine.clone(),
+                        question,
+                        image_data,
+                        auto_speak,
+                    )
+                    .await;
 
                     app.set_is_busy(false);
 
@@ -360,51 +294,16 @@ pub fn setup_app(app: &AppWindow) {
                 #[cfg(target_os = "android")]
                 let image_data: Option<Vec<u8>> = None;
 
-                drop(state.lock().await);
-
-                if let Some(img) = image_data {
-                    let result = {
-                        let eng = engine.lock().await;
-                        eng.ask_about_image(&img, &question).await
-                    };
-
-                    let app = app_weak.unwrap();
-                    match result {
-                        Ok(response) => {
-                            app.set_ai_response(response.content.clone().into());
-
-                            // Track tokens
-                            {
-                                let mut eng = engine.lock().await;
-                                let ctx = eng.context_mut();
-                                ctx.add_tokens(response.tokens_used);
-                                app.set_session_tokens(ctx.session_tokens() as i32);
-                                let _ = eng.learn_from_interaction(&question, &response.content);
-                            }
-
-                            app.set_status_text("就绪".into());
-                            app.set_status_type("ready".into());
-
-                            if auto_speak {
-                                let engine = engine.clone();
-                                let app_weak2 = app_weak.clone();
-                                let text = response.content.clone();
-                                slint::spawn_local(async move {
-                                    let _ = speak_and_play(engine, &text).await;
-                                    let app = app_weak2.unwrap();
-                                    app.set_status_text("就绪".into());
-                                    app.set_status_type("ready".into());
-                                })
-                                .unwrap();
-                            }
-                        }
-                        Err(e) => {
-                            app.set_ai_response(slint::format!("失败: {}", e));
-                            app.set_status_text("就绪".into());
-                            app.set_status_type("ready".into());
-                        }
-                    }
-                }
+                handle_question_response(
+                    &state,
+                    &app,
+                    &app_weak,
+                    engine.clone(),
+                    question,
+                    image_data,
+                    auto_speak,
+                )
+                .await;
 
                 let app = app_weak.unwrap();
                 app.set_is_busy(false);
@@ -624,6 +523,275 @@ pub fn setup_app(app: &AppWindow) {
             .unwrap();
         });
     }
+}
+
+struct AssistantReply {
+    content: String,
+    tokens_used: usize,
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+async fn handle_question_response(
+    state: &Arc<Mutex<AppState>>,
+    app: &AppWindow,
+    app_weak: &slint::Weak<AppWindow>,
+    engine: Arc<Mutex<AleEngine>>,
+    question: String,
+    image_data: Option<Vec<u8>>,
+    auto_speak: bool,
+) {
+    let result = ask_question(app, engine.clone(), &question, image_data).await;
+
+    match result {
+        Ok(reply) => {
+            app.set_ai_response(reply.content.clone().into());
+            record_interaction(
+                app,
+                engine.clone(),
+                &question,
+                &reply.content,
+                reply.tokens_used,
+            )
+            .await;
+
+            if let Some(calls) = reply.tool_calls {
+                apply_tool_calls(state, app, &calls).await;
+            } else {
+                state.lock().await.pending_plan = None;
+                app.set_action_steps("".into());
+                app.set_confirmation_text("".into());
+                app.set_show_confirmation(false);
+            }
+
+            app.set_status_text("就绪".into());
+            app.set_status_type("ready".into());
+
+            if auto_speak && !reply.content.is_empty() {
+                let app_weak = app_weak.clone();
+                let text = reply.content;
+                slint::spawn_local(async move {
+                    let _ = speak_and_play(engine, &text).await;
+                    let app = app_weak.unwrap();
+                    app.set_status_text("就绪".into());
+                    app.set_status_type("ready".into());
+                })
+                .unwrap();
+            }
+        }
+        Err(error) => {
+            app.set_ai_response(slint::format!("失败: {}", error));
+            app.set_status_text("就绪".into());
+            app.set_status_type("ready".into());
+        }
+    }
+}
+
+async fn ask_question(
+    app: &AppWindow,
+    engine: Arc<Mutex<AleEngine>>,
+    question: &str,
+    image_data: Option<Vec<u8>>,
+) -> Result<AssistantReply, String> {
+    if let Some(image_data) = image_data {
+        app.set_status_text("分析画面...".into());
+        let response = {
+            let engine = engine.lock().await;
+            engine
+                .ask_about_image_with_tools(&image_data, question, automation_tools())
+                .await
+                .map_err(|error| error.to_string())?
+        };
+
+        return Ok(AssistantReply {
+            content: response.content,
+            tokens_used: response.tokens_used,
+            tool_calls: response.tool_calls,
+        });
+    }
+
+    app.set_status_text("思考中...".into());
+    let response = {
+        let engine = engine.lock().await;
+        engine
+            .ask_text(question)
+            .await
+            .map_err(|error| error.to_string())?
+    };
+
+    Ok(AssistantReply {
+        content: response.content,
+        tokens_used: response.tokens_used,
+        tool_calls: None,
+    })
+}
+
+async fn record_interaction(
+    app: &AppWindow,
+    engine: Arc<Mutex<AleEngine>>,
+    question: &str,
+    answer: &str,
+    tokens_used: usize,
+) {
+    let mut engine = engine.lock().await;
+    let ctx = engine.context_mut();
+    ctx.add_user_message(question.to_string());
+    ctx.add_assistant_message(answer.to_string());
+    ctx.add_tokens(tokens_used);
+    app.set_session_tokens(ctx.session_tokens() as i32);
+    let _ = engine.learn_from_interaction(question, answer);
+}
+
+async fn apply_tool_calls(state: &Arc<Mutex<AppState>>, app: &AppWindow, calls: &[ToolCall]) {
+    let mut descriptions = Vec::new();
+    let mut pending_plan = None;
+
+    for call in calls {
+        match parse_tool_action_plan(&call.function.arguments) {
+            Ok(plan) => {
+                descriptions.extend(plan.describe_steps());
+                pending_plan = Some(plan);
+            }
+            Err(_) => descriptions.push(format!(
+                "{}: {}",
+                call.function.name, call.function.arguments
+            )),
+        }
+    }
+
+    app.set_action_steps(descriptions.join("\n").into());
+
+    if let Some(plan) = pending_plan {
+        let confirmation_text = plan.speak_text();
+        state.lock().await.pending_plan = Some(plan);
+        app.set_confirmation_text(confirmation_text.into());
+        app.set_show_confirmation(true);
+    } else {
+        state.lock().await.pending_plan = None;
+        app.set_confirmation_text("".into());
+        app.set_show_confirmation(false);
+    }
+}
+
+fn parse_tool_action_plan(arguments: &str) -> Result<ActionPlan, serde_json::Error> {
+    parse_action_plan(arguments).or_else(|_| {
+        let value: serde_json::Value = serde_json::from_str(arguments)?;
+        serde_json::from_value(value["plan"].clone())
+    })
+}
+
+fn automation_tools() -> Vec<serde_json::Value> {
+    vec![serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "execute_action_plan",
+            "description": "Create a desktop automation plan for the visible screen. The app will show the plan to the user for confirmation before executing it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "explanation": {
+                        "type": "string",
+                        "description": "Short natural-language explanation of what will be done."
+                    },
+                    "risk_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"]
+                    },
+                    "requires_confirmation": {
+                        "type": "boolean",
+                        "description": "Whether the user must confirm before execution. Use true for any action that changes data, opens apps, types, clicks, or uses files."
+                    },
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["click"] },
+                                        "x": { "type": "number" },
+                                        "y": { "type": "number" },
+                                        "button": { "type": "string", "enum": ["left", "right", "middle"] }
+                                    },
+                                    "required": ["type", "x", "y", "button"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["double_click"] },
+                                        "x": { "type": "number" },
+                                        "y": { "type": "number" }
+                                    },
+                                    "required": ["type", "x", "y"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["mouse_move"] },
+                                        "x": { "type": "number" },
+                                        "y": { "type": "number" }
+                                    },
+                                    "required": ["type", "x", "y"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["scroll"] },
+                                        "x": { "type": "number" },
+                                        "y": { "type": "number" },
+                                        "delta_x": { "type": "number" },
+                                        "delta_y": { "type": "number" }
+                                    },
+                                    "required": ["type", "x", "y", "delta_x", "delta_y"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["type"] },
+                                        "text": { "type": "string" }
+                                    },
+                                    "required": ["type", "text"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["key"] },
+                                        "key": { "type": "string" },
+                                        "modifiers": { "type": "array", "items": { "type": "string" } }
+                                    },
+                                    "required": ["type", "key", "modifiers"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["wait"] },
+                                        "ms": { "type": "integer" }
+                                    },
+                                    "required": ["type", "ms"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["open_app"] },
+                                        "name": { "type": "string" }
+                                    },
+                                    "required": ["type", "name"]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": { "type": "string", "enum": ["open_url"] },
+                                        "url": { "type": "string" }
+                                    },
+                                    "required": ["type", "url"]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": ["explanation", "risk_level", "requires_confirmation", "actions"]
+            }
+        }
+    })]
 }
 
 fn initialize_platform_services(st: &mut AppState) {

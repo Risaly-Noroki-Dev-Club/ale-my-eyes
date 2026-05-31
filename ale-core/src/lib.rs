@@ -245,6 +245,25 @@ impl AleEngine {
         cloud_api.health_check().await
     }
 
+    /// 纯文本问答（无屏幕截图或相机画面时使用）。
+    pub async fn ask_text(&self, question: &str) -> Result<cloud::CloudResponse> {
+        if self
+            .config_manager
+            .config()
+            .cloud_api
+            .api_key
+            .trim()
+            .is_empty()
+        {
+            return Err(AleError::ConfigError("API key is required".to_string()));
+        }
+
+        let cloud_config = Self::cloud_config_from_app(&self.config_manager.config().cloud_api);
+        let cloud_api = cloud::CloudApiFactory::create(cloud_config);
+        let messages = self.context_manager.build_messages(None, question);
+        cloud_api.chat(messages).await
+    }
+
     /// 图像描述（通过推理引擎）
     pub async fn describe_image(&self, image_data: &[u8]) -> Result<String> {
         let result = self.inference_engine.describe_image(image_data).await?;
