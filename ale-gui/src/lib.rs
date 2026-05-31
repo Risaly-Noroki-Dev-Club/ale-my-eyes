@@ -79,7 +79,9 @@ pub fn setup_app(app: &AppWindow) {
         slint::spawn_local(async move {
             let result = create_engine().await;
             let mut st = state.lock().await;
-            let app = app_weak.unwrap();
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
 
             match result {
                 Ok((engine, config)) => {
@@ -147,7 +149,9 @@ pub fn setup_app(app: &AppWindow) {
                         }
                     }
 
-                    let app = app_weak.unwrap();
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
                     match st.vad.state() {
                         VadState::Speaking => app.set_vad_state("speaking".into()),
                         VadState::SpeechEnded => app.set_vad_state("speech_ended".into()),
@@ -211,7 +215,9 @@ pub fn setup_app(app: &AppWindow) {
                         eng.transcribe(&audio).await
                     };
 
-                    let app = app_weak.unwrap();
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
 
                     let question = match transcription {
                         Ok(ref text) => {
@@ -270,7 +276,9 @@ pub fn setup_app(app: &AppWindow) {
 
                 let Some(engine) = engine else { return };
 
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
                 app.set_transcription(question.clone().into());
                 app.set_is_busy(true);
                 app.set_status_text("分析中...".into());
@@ -298,7 +306,9 @@ pub fn setup_app(app: &AppWindow) {
                 )
                 .await;
 
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
                 app.set_is_busy(false);
             })
             .unwrap();
@@ -320,7 +330,9 @@ pub fn setup_app(app: &AppWindow) {
                         if let Some(ref mut ae) = st.automation {
                             match ae.execute_plan(&plan) {
                                 Ok(result) => {
-                                    let app = app_weak.unwrap();
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
                                     app.set_show_confirmation(false);
                                     app.set_status_text(slint::format!(
                                         "执行完成: {} 步",
@@ -328,14 +340,18 @@ pub fn setup_app(app: &AppWindow) {
                                     ));
                                 }
                                 Err(e) => {
-                                    let app = app_weak.unwrap();
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
                                     app.set_show_confirmation(false);
                                     app.set_status_text(slint::format!("执行失败: {}", e));
                                     app.set_status_type("error".into());
                                 }
                             }
                         } else {
-                            let app = app_weak.unwrap();
+                            let Some(app) = app_weak.upgrade() else {
+                                return;
+                            };
                             app.set_show_confirmation(false);
                             app.set_status_text("自动化引擎不可用".into());
                             app.set_status_type("error".into());
@@ -343,7 +359,9 @@ pub fn setup_app(app: &AppWindow) {
                     }
                     #[cfg(target_os = "android")]
                     {
-                        let app = app_weak.unwrap();
+                        let Some(app) = app_weak.upgrade() else {
+                            return;
+                        };
                         app.set_show_confirmation(false);
                         app.set_status_text(slint::format!(
                             "Android 暂不支持执行 {} 个桌面自动化动作",
@@ -360,7 +378,9 @@ pub fn setup_app(app: &AppWindow) {
     {
         let app_weak = app_weak.clone();
         app.on_cancel_action(move || {
-            let app = app_weak.unwrap();
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
             app.set_show_confirmation(false);
             app.set_confirmation_text("".into());
         });
@@ -375,7 +395,9 @@ pub fn setup_app(app: &AppWindow) {
             let app_weak = app_weak.clone();
             slint::spawn_local(async move {
                 let st = state.lock().await;
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
                 if let Some(ref engine) = st.engine {
                     let eng = engine.lock().await;
                     apply_config_to_app(&app, eng.config());
@@ -390,7 +412,10 @@ pub fn setup_app(app: &AppWindow) {
     {
         let app_weak = app_weak.clone();
         app.on_close_settings(move || {
-            app_weak.unwrap().set_show_settings(false);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_show_settings(false);
         });
     }
 
@@ -398,38 +423,56 @@ pub fn setup_app(app: &AppWindow) {
     {
         let app_weak = app_weak.clone();
         app.on_provider_changed(move |text| {
-            app_weak.unwrap().set_provider(text);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_provider(text);
         });
     }
     {
         let app_weak = app_weak.clone();
         app.on_api_key_changed(move |text| {
-            app_weak.unwrap().set_api_key(text);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_api_key(text);
         });
     }
     {
         let app_weak = app_weak.clone();
         app.on_api_url_changed(move |text| {
-            app_weak.unwrap().set_api_url(text);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_api_url(text);
         });
     }
     {
         let app_weak = app_weak.clone();
         app.on_model_changed(move |text| {
-            app_weak.unwrap().set_model(text);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_model(text);
         });
     }
     {
         let app_weak = app_weak.clone();
         app.on_max_tokens_changed(move |text| {
-            app_weak.unwrap().set_max_tokens_str(text);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_max_tokens_str(text);
         });
     }
     {
         let state = state.clone();
         let app_weak = app_weak.clone();
         app.on_auto_speak_changed(move |value| {
-            app_weak.unwrap().set_auto_speak(value);
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_auto_speak(value);
             let state = state.clone();
             slint::spawn_local(async move {
                 state.lock().await.auto_speak = value;
@@ -440,7 +483,9 @@ pub fn setup_app(app: &AppWindow) {
     {
         let app_weak = app_weak.clone();
         app.on_toggle_api_key_visible(move || {
-            let app = app_weak.unwrap();
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
             app.set_show_api_key(!app.get_show_api_key());
         });
     }
@@ -458,7 +503,9 @@ pub fn setup_app(app: &AppWindow) {
                 drop(st);
 
                 let Some(engine) = engine else { return };
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
                 let config = {
                     let engine = engine.lock().await;
                     config_from_app(&app, engine.config())
@@ -468,7 +515,9 @@ pub fn setup_app(app: &AppWindow) {
 
                 let result = save_settings(engine, config).await;
                 let mut st = state.lock().await;
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
 
                 match result {
                     Ok((new_engine, new_config)) => {
@@ -502,11 +551,15 @@ pub fn setup_app(app: &AppWindow) {
                 drop(st);
 
                 let Some(engine) = engine else { return };
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
                 app.set_is_busy(true);
 
                 let result = test_connection(engine).await;
-                let app = app_weak.unwrap();
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
 
                 match result {
                     Ok(true) => {
