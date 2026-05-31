@@ -30,6 +30,7 @@ pub struct AppState {
     engine: Option<Arc<Mutex<AleEngine>>>,
     recorder: Option<audio::Recorder>,
     recording_started: Option<Instant>,
+    vad_sample_offset: usize,
     auto_speak: bool,
     vad: VoiceActivityDetector,
     vad_active: bool,
@@ -54,6 +55,7 @@ impl AppState {
             engine: None,
             recorder: None,
             recording_started: None,
+            vad_sample_offset: 0,
             auto_speak: true,
             vad: VoiceActivityDetector::with_default_config(),
             vad_active: false,
@@ -128,11 +130,13 @@ pub fn setup_app(app: &AppWindow) {
                         return;
                     }
 
+                    let mut vad_sample_offset = st.vad_sample_offset;
                     let samples = if let Some(ref recorder) = st.recorder {
-                        recorder.take_samples()
+                        recorder.samples_since(&mut vad_sample_offset)
                     } else {
                         return;
                     };
+                    st.vad_sample_offset = vad_sample_offset;
 
                     if samples.is_empty() {
                         return;
@@ -614,6 +618,7 @@ fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
         Ok(recorder) => {
             st.recorder = Some(recorder);
             st.recording_started = Some(Instant::now());
+            st.vad_sample_offset = 0;
             st.vad.reset();
             st.vad_active = true;
             app.set_vad_state("silent".into());

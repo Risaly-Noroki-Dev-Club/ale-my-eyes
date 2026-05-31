@@ -65,12 +65,18 @@ impl Recorder {
         Ok(cursor.into_inner())
     }
 
-    /// Drain accumulated samples and return as i16 PCM bytes (for VAD processing)
-    pub fn take_samples(&self) -> Vec<u8> {
-        let Ok(mut buffer) = self.samples.lock() else {
+    /// Return samples appended after `offset` as i16 PCM bytes without draining the recording.
+    pub fn samples_since(&self, offset: &mut usize) -> Vec<u8> {
+        let Ok(buffer) = self.samples.lock() else {
             return Vec::new();
         };
-        let samples: Vec<f32> = buffer.drain(..).collect();
+        if *offset > buffer.len() {
+            *offset = buffer.len();
+        }
+
+        let samples = buffer[*offset..].to_vec();
+        *offset = buffer.len();
+
         let mut pcm = Vec::with_capacity(samples.len() * 2);
         for s in samples {
             let i = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
