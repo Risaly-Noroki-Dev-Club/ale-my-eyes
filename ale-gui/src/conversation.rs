@@ -1,5 +1,5 @@
 use crate::{tts_player, AppState, AppWindow};
-use ale_core::actions::{parse_action_plan, ActionPlan};
+use ale_core::actions::parse_action_plan_arguments;
 use ale_core::cloud::ToolCall;
 use ale_core::AleEngine;
 use std::sync::Arc;
@@ -128,7 +128,7 @@ async fn apply_tool_calls(state: &Arc<Mutex<AppState>>, app: &AppWindow, calls: 
     let mut pending_plan = None;
 
     for call in calls {
-        match parse_tool_action_plan(&call.function.arguments) {
+        match parse_action_plan_arguments(&call.function.arguments) {
             Ok(plan) => {
                 descriptions.extend(plan.describe_steps());
                 pending_plan = Some(plan);
@@ -152,13 +152,6 @@ async fn apply_tool_calls(state: &Arc<Mutex<AppState>>, app: &AppWindow, calls: 
         app.set_confirmation_text("".into());
         app.set_show_confirmation(false);
     }
-}
-
-fn parse_tool_action_plan(arguments: &str) -> Result<ActionPlan, serde_json::Error> {
-    parse_action_plan(arguments).or_else(|_| {
-        let value: serde_json::Value = serde_json::from_str(arguments)?;
-        serde_json::from_value(value["plan"].clone())
-    })
 }
 
 fn automation_tools() -> Vec<serde_json::Value> {

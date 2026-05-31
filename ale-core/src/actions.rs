@@ -203,6 +203,16 @@ pub fn parse_action_plan(json: &str) -> Result<ActionPlan, serde_json::Error> {
     serde_json::from_str(json)
 }
 
+/// 从 OpenAI-compatible function call arguments 解析操作计划。
+///
+/// 兼容两种常见形态：完整 ActionPlan，或 `{ "plan": ActionPlan }` 包装对象。
+pub fn parse_action_plan_arguments(json: &str) -> Result<ActionPlan, serde_json::Error> {
+    parse_action_plan(json).or_else(|_| {
+        let value: serde_json::Value = serde_json::from_str(json)?;
+        serde_json::from_value(value["plan"].clone())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +300,39 @@ mod tests {
         let plan = parse_action_plan(json).unwrap();
         assert_eq!(plan.actions.len(), 1);
         assert_eq!(plan.explanation, "点击按钮");
+    }
+
+    #[test]
+    fn test_parse_action_plan_arguments_direct() {
+        let json = r#"{
+            "actions": [
+                {"type": "click", "x": 10.0, "y": 20.0, "button": "left"}
+            ],
+            "risk_level": "medium",
+            "explanation": "点击按钮",
+            "requires_confirmation": true
+        }"#;
+
+        let plan = parse_action_plan_arguments(json).unwrap();
+        assert_eq!(plan.actions.len(), 1);
+        assert!(plan.requires_confirmation);
+    }
+
+    #[test]
+    fn test_parse_action_plan_arguments_wrapped() {
+        let json = r#"{
+            "plan": {
+                "actions": [
+                    {"type": "open_app", "name": "notepad"}
+                ],
+                "risk_level": "medium",
+                "explanation": "打开记事本",
+                "requires_confirmation": true
+            }
+        }"#;
+
+        let plan = parse_action_plan_arguments(json).unwrap();
+        assert_eq!(plan.actions.len(), 1);
+        assert_eq!(plan.explanation, "打开记事本");
     }
 }
