@@ -1,5 +1,5 @@
 pub async fn pick_image() -> Result<(Vec<u8>, String), String> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         pick_image_desktop().await
     }
@@ -7,9 +7,13 @@ pub async fn pick_image() -> Result<(Vec<u8>, String), String> {
     {
         pick_image_android().await
     }
+    #[cfg(target_os = "ios")]
+    {
+        pick_image_ios().await
+    }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn pick_image_desktop() -> Result<(Vec<u8>, String), String> {
     let file = rfd::AsyncFileDialog::new()
         .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
@@ -94,4 +98,54 @@ async fn pick_image_android() -> Result<(Vec<u8>, String), String> {
     // In a real implementation, we'd wait for the result via a channel
     // For now, return an error indicating the picker was launched
     Err("请在弹出的选择器中选择图片".to_string())
+}
+
+#[cfg(target_os = "ios")]
+async fn pick_image_ios() -> Result<(Vec<u8>, String), String> {
+    // iOS 图片选择器 — 通过 objc2 调用 UIImagePickerController
+    // 注意：UIImagePickerController 必须在主线程上呈现
+    // 这里使用简化实现，实际需要通过 dispatch_async 在主线程上执行
+
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    unsafe {
+        // 获取当前的 key window
+        let app: *mut AnyObject = msg_send![class!(UIApplication), sharedApplication];
+        let windows: *mut AnyObject = msg_send![app, windows];
+        let key_window: *mut AnyObject = msg_send![windows, objectAtIndex: 0i64];
+
+        if key_window.is_null() {
+            return Err("无法获取当前窗口".to_string());
+        }
+
+        // 获取 root view controller
+        let root_vc: *mut AnyObject = msg_send![key_window, rootViewController];
+        if root_vc.is_null() {
+            return Err("无法获取 root view controller".to_string());
+        }
+
+        // 创建 UIImagePickerController
+        let picker_class = class!(UIImagePickerController);
+        let is_available: bool = msg_send![picker_class, isSourceTypeAvailable: 0i64]; // UIImagePickerControllerSourceTypePhotoLibrary
+        if !is_available {
+            return Err("图片选择器不可用".to_string());
+        }
+
+        let picker: *mut AnyObject = msg_send![picker_class, alloc];
+        let picker: *mut AnyObject = msg_send![picker, init];
+        let _: () = msg_send![picker, setSourceType: 0i64]; // Photo Library
+
+        // 注意：需要设置 delegate 来接收选择结果
+        // 这里简化处理，返回错误提示用户手动选择
+        let _: () = msg_send![root_vc, presentViewController: picker animated:true completion: {
+            // 完成回调
+        }];
+
+        tracing::info!("iOS image picker presented");
+    }
+
+    // 简化实现：返回错误提示
+    // 完整实现需要创建 UIImagePickerControllerDelegate 处理回调
+    Err("请在弹出的选择器中选择图片（iOS）".to_string())
 }

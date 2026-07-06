@@ -15,21 +15,23 @@ export component CompactScreen inherits Rectangle {
     in property <int> session-tokens: 0;
     in property <int> max-tokens-budget: 4000;
     in property <string> text-input: "";
+    in property <bool> show-accessibility-prompt: false;
 
     callback text-submitted(string);
     callback confirm-action();
     callback cancel-action();
     callback open-settings();
+    callback open-accessibility-settings();
 
     background: Palette.background;
 
     VerticalLayout {
-        padding: 8px;
-        spacing: 4px;
+        padding: AppTheme.pad;
+        spacing: AppTheme.gap;
 
         // 状态行
         HorizontalLayout {
-            spacing: 6px;
+            spacing: AppTheme.gap;
             alignment: space-between;
 
             HorizontalLayout {
@@ -51,29 +53,79 @@ export component CompactScreen inherits Rectangle {
                 }
             }
 
-            HorizontalLayout {
-                spacing: 4px;
+            // 设置按钮 — 触控友好尺寸
+            Rectangle {
+                width: AppTheme.touch-min;
+                height: AppTheme.touch-min;
+                border-radius: 8px;
+                background: settings-touch.has-hover ? Palette.control-background : transparent;
+
                 Text {
                     text: "⚙";
-                    font-size: 14px;
+                    font-size: AppTheme.is-mobile ? 20px : 14px;
                     color: Palette.foreground.transparentize(0.4);
+                    horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-                TouchArea {
+
+                settings-touch := TouchArea {
                     clicked => { root.open-settings(); }
+                }
+            }
+        }
+
+        // 无障碍服务提示
+        if root.show-accessibility-prompt : Rectangle {
+            height: AppTheme.touch-min + 8px;
+            background: Palette.accent-background.transparentize(0.85);
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Palette.accent-background;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+
+                Text {
+                    text: "需要启用无障碍服务才能执行自动化操作";
+                    font-size: AppTheme.base-font - 2px;
+                    color: Palette.foreground;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    width: 80px;
+                    height: AppTheme.touch-min;
+                    border-radius: 8px;
+                    background: Palette.accent-background;
+
+                    Text {
+                        text: "启用";
+                        font-size: AppTheme.base-font;
+                        color: Palette.accent-foreground;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => { root.open-accessibility-settings(); }
+                    }
                 }
             }
         }
 
         // 转写区
         if root.transcription != "" : Rectangle {
-            height: 22px;
+            height: AppTheme.is-mobile ? 28px : 22px;
             background: Palette.alternate-background;
-            border-radius: 4px;
+            border-radius: 6px;
 
             HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
+                padding-left: 12px;
+                padding-right: 12px;
                 Text {
                     text: "🎙 " + root.transcription;
                     font-size: AppTheme.base-font - 2px;
@@ -88,12 +140,12 @@ export component CompactScreen inherits Rectangle {
         Rectangle {
             vertical-stretch: 1;
             background: Palette.control-background;
-            border-radius: 6px;
+            border-radius: 8px;
             border-width: 1px;
             border-color: Palette.border;
 
             VerticalLayout {
-                padding: 8px;
+                padding: 12px;
 
                 if root.ai-response == "" && root.action-steps == "" : Text {
                     text: "等待语音指令...";
@@ -104,7 +156,7 @@ export component CompactScreen inherits Rectangle {
                 }
 
                 if root.ai-response != "" : VerticalLayout {
-                    spacing: 4px;
+                    spacing: 6px;
 
                     Text {
                         text: root.ai-response;
@@ -127,22 +179,22 @@ export component CompactScreen inherits Rectangle {
 
         // 确认对话框
         if root.show-confirmation : HorizontalLayout {
-            spacing: 6px;
-            height: 28px;
+            spacing: 8px;
+            height: AppTheme.touch-min;
 
             Rectangle {
                 horizontal-stretch: 1;
                 background: Palette.accent-background.transparentize(0.9);
-                border-radius: 4px;
+                border-radius: 8px;
                 border-width: 1px;
                 border-color: Palette.accent-background;
 
                 HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
+                    padding-left: 12px;
+                    padding-right: 12px;
                     Text {
                         text: "⚠ " + root.confirmation-text;
-                        font-size: AppTheme.base-font - 3px;
+                        font-size: AppTheme.base-font - 2px;
                         color: Palette.foreground;
                         overflow: elide;
                         vertical-alignment: center;
@@ -162,8 +214,8 @@ export component CompactScreen inherits Rectangle {
 
         // 底部栏
         HorizontalLayout {
-            spacing: 6px;
-            height: 28px;
+            spacing: 8px;
+            height: AppTheme.touch-min;
 
             Text {
                 text: "Token:" + root.session-tokens + "/" + root.max-tokens-budget;
@@ -176,13 +228,13 @@ export component CompactScreen inherits Rectangle {
             Rectangle {
                 horizontal-stretch: 1;
                 background: Palette.control-background;
-                border-radius: 4px;
+                border-radius: 8px;
                 border-width: 1px;
                 border-color: Palette.border;
 
                 HorizontalLayout {
-                    padding-left: 6px;
-                    padding-right: 6px;
+                    padding-left: 10px;
+                    padding-right: 10px;
 
                     LineEdit {
                         text: root.text-input;
@@ -193,15 +245,16 @@ export component CompactScreen inherits Rectangle {
                 }
             }
 
+            // 发送按钮 — 触控友好尺寸
             Rectangle {
-                width: 28px;
-                height: 28px;
-                border-radius: 4px;
+                width: AppTheme.touch-min;
+                height: AppTheme.touch-min;
+                border-radius: 8px;
                 background: root.engine-ready ? Palette.accent-background : Palette.border;
 
                 Text {
                     text: "📤";
-                    font-size: 12px;
+                    font-size: AppTheme.is-mobile ? 18px : 12px;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }

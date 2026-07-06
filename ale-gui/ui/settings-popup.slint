@@ -27,7 +27,7 @@ export component SettingsPopup inherits Rectangle {
 
     Rectangle {
         width: 340px;
-        height: 420px;
+        height: 440px;
         background: Palette.background;
         border-radius: 12px;
         border-width: 1px;
@@ -35,7 +35,7 @@ export component SettingsPopup inherits Rectangle {
 
         VerticalLayout {
             padding: 16px;
-            spacing: 10px;
+            spacing: AppTheme.gap + 2px;
 
             // 标题栏
             HorizontalLayout {
@@ -58,7 +58,7 @@ export component SettingsPopup inherits Rectangle {
                 vertical-stretch: 1;
 
                 VerticalLayout {
-                    spacing: 8px;
+                    spacing: 10px;
 
                     // 云端 API
                     Text { text: "云端 API"; font-size: AppTheme.base-font; font-weight: 600; color: Palette.foreground; }
@@ -80,7 +80,7 @@ export component SettingsPopup inherits Rectangle {
                         color: Palette.foreground.transparentize(0.3);
                     }
                     HorizontalLayout {
-                        spacing: 6px;
+                        spacing: 8px;
                         LineEdit {
                             text: root.api-key;
                             placeholder-text: "sk-...";

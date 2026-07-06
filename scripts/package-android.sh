@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -8,15 +8,16 @@ YELLOW="\033[1;33m"
 NC="\033[0m"
 
 DEFAULT_NDK_VERSION="27.3.13750724"
-DEFAULT_TARGETS="aarch64-linux-android armv7-linux-androideabi"
+DEFAULT_TARGETS="aarch64-linux-android"
 PACKAGE_DIR="ale-my-eyes-android"
+TARGET_ANDROID_API="34"
 
 log_info() {
     printf "%b%s%b\n" "$GREEN" "$1" "$NC"
 }
 
 log_warn() {
-    printf "%b%s%b\n" "$YELLOW" "$1" "$NC"
+    printf "%b%s%b\n" "$YELLOW" "$1" "$NC" >&2
 }
 
 log_error() {
@@ -31,63 +32,138 @@ require_command() {
 }
 
 require_repo_root() {
-    if [ ! -f "Cargo.toml" ]; then
+    if [ ! -f "Cargo.toml" ] || [ ! -d "ale-gui" ]; then
         log_error "请在项目根目录运行此脚本"
         exit 1
     fi
 }
 
+is_valid_ndk() {
+    local ndk_root="$1"
+    [ -d "$ndk_root" ] && [ -f "$ndk_root/source.properties" ]
+}
+
 resolve_sdk_root() {
-    local sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-    if [ ! -d "$sdk_root" ]; then
-        log_error "Android SDK 目录不存在: $sdk_root"
-        log_error "请设置 ANDROID_HOME 或 ANDROID_SDK_ROOT"
+    local candidates=()
+
+    if [ -n "${ANDROID_HOME:-}" ]; then
+        candidates+=("$ANDROID_HOME")
+    fi
+    if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+        candidates+=("$ANDROID_SDK_ROOT")
+    fi
+    candidates+=("$HOME/Library/Android/sdk")
+    candidates+=("/usr/local/lib/android/sdk")
+    candidates+=("/opt/android-sdk")
+
+    local sdk_root=""
+    for sdk_root in "${candidates[@]}"; do
+        if [ -d "$sdk_root" ]; then
+            printf "%s\n" "$sdk_root"
+            return
+        fi
+    done
+
+    log_error "未找到 Android SDK"
+    log_error "请安装 Android Studio，或设置 ANDROID_HOME=/path/to/android-sdk"
+    exit 1
+}
+
+resolve_android_jar() {
+    local sdk_root="$1"
+    local preferred="$sdk_root/platforms/android-$TARGET_ANDROID_API/android.jar"
+
+    if [ -f "$preferred" ]; then
+        printf "%s\n" "$preferred"
+        return
+    fi
+
+    local jar=""
+    jar=$(find "$sdk_root/platforms" -mindepth 2 -maxdepth 2 -name android.jar -type f 2>/dev/null | sort -V | tail -n 1 || true)
+    if [ -n "$jar" ]; then
+        log_warn "未找到 android-$TARGET_ANDROID_API，回退到: $jar"
+        printf "%s\n" "$jar"
+        return
+    fi
+
+    log_error "未找到 android.jar"
+    log_error "请在 Android Studio 的 SDK Platforms 中安装 Android API $TARGET_ANDROID_API"
+    exit 1
+}
+
+resolve_build_tools() {
+    local sdk_root="$1"
+    local build_tools_dir="$sdk_root/build-tools"
+    local newest=""
+
+    if [ ! -d "$build_tools_dir" ]; then
+        log_error "未找到 Android build-tools"
+        log_error "请在 Android Studio 的 SDK Tools 中安装 Android SDK Build-Tools"
         exit 1
     fi
 
-    printf "%s\n" "$sdk_root"
+    newest=$(find "$build_tools_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1 || true)
+    if [ -z "$newest" ]; then
+        log_error "Android build-tools 目录为空: $build_tools_dir"
+        exit 1
+    fi
+
+    printf "%s\n" "$newest"
 }
 
 resolve_ndk_root() {
     local sdk_root="$1"
     local requested_version="${ANDROID_NDK_VERSION:-}"
+    local ndk_root=""
 
     if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
-        if [ ! -d "$ANDROID_NDK_ROOT" ]; then
-            log_error "ANDROID_NDK_ROOT 不存在: $ANDROID_NDK_ROOT"
-            exit 1
+        if is_valid_ndk "$ANDROID_NDK_ROOT"; then
+            printf "%s\n" "$ANDROID_NDK_ROOT"
+            return
         fi
-        printf "%s\n" "$ANDROID_NDK_ROOT"
-        return
+        log_warn "忽略无效 ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
     fi
 
     if [ -n "$requested_version" ]; then
-        local requested_path="$sdk_root/ndk/$requested_version"
-        if [ ! -d "$requested_path" ]; then
-            log_error "未找到 Android NDK 版本: $requested_version"
-            log_error "请安装该版本，或显式设置 ANDROID_NDK_ROOT"
-            exit 1
+        ndk_root="$sdk_root/ndk/$requested_version"
+        if is_valid_ndk "$ndk_root"; then
+            printf "%s\n" "$ndk_root"
+            return
         fi
-        printf "%s\n" "$requested_path"
+        log_error "未找到可用 Android NDK 版本: $requested_version"
+        log_error "请安装该版本，或设置 ANDROID_NDK_ROOT 指向有效 NDK 目录"
+        exit 1
+    fi
+
+    ndk_root="$sdk_root/ndk/$DEFAULT_NDK_VERSION"
+    if is_valid_ndk "$ndk_root"; then
+        printf "%s\n" "$ndk_root"
         return
     fi
 
-    if [ -d "$sdk_root/ndk/$DEFAULT_NDK_VERSION" ]; then
-        printf "%s\n" "$sdk_root/ndk/$DEFAULT_NDK_VERSION"
-        return
-    fi
+    ndk_root=$(find "$sdk_root/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while read -r candidate; do
+        if is_valid_ndk "$candidate"; then
+            printf "%s\n" "$candidate"
+        fi
+    done | sort -V | tail -n 1 || true)
 
-    local newest_path=""
-    newest_path=$(find "$sdk_root/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1 || true)
-    if [ -n "$newest_path" ]; then
-        log_warn "默认 NDK 版本 $DEFAULT_NDK_VERSION 不存在，回退到 $(basename "$newest_path")"
-        printf "%s\n" "$newest_path"
+    if [ -n "$ndk_root" ]; then
+        log_warn "默认 NDK 版本 $DEFAULT_NDK_VERSION 不存在，回退到 $(basename "$ndk_root")"
+        printf "%s\n" "$ndk_root"
         return
     fi
 
     log_error "未找到任何可用的 Android NDK"
-    log_error "请安装 Android NDK，或显式设置 ANDROID_NDK_ROOT"
+    log_error "请在 Android Studio 的 SDK Tools 中安装 NDK (Side by side)"
     exit 1
+}
+
+ensure_java_tools() {
+    if ! command -v javac >/dev/null 2>&1; then
+        log_error "未找到 javac。macOS 可运行: brew install openjdk@17"
+        exit 1
+    fi
+    require_command keytool
 }
 
 ensure_cargo_apk() {
@@ -173,7 +249,7 @@ build_target() {
     clear_apk_outputs "$target"
 
     log_info "构建 $target..."
-    cargo apk build -p ale-gui --target "$target" --lib --release
+    ANDROID_HOME="$ANDROID_HOME" ANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" cargo apk build -p ale-gui --target "$target" --lib --release
 
     apk_path=$(locate_apk_for_target "$target")
     cp "$apk_path" "$PACKAGE_DIR/$output_name"
@@ -209,29 +285,39 @@ print_summary() {
 main() {
     local sdk_root=""
     local ndk_root=""
+    local android_jar=""
+    local build_tools_root=""
     local output_name=""
 
     require_repo_root
     require_command rustup
     require_command cargo
-    require_command keytool
     require_command find
+    ensure_java_tools
 
     sdk_root=$(resolve_sdk_root)
-    export ANDROID_HOME="$sdk_root"
-    export ANDROID_SDK_ROOT="$sdk_root"
-
     ndk_root=$(resolve_ndk_root "$sdk_root")
+    android_jar=$(resolve_android_jar "$sdk_root")
+    build_tools_root=$(resolve_build_tools "$sdk_root")
+
+    export ANDROID_HOME="$sdk_root"
     export ANDROID_NDK_ROOT="$ndk_root"
     export ANDROID_NDK_HOME="$ndk_root"
     export ANDROID_NDK="$ndk_root"
     export NDK_HOME="$ndk_root"
     export ANDROID_NDK_VERSION="$(basename "$ndk_root")"
+    unset ANDROID_SDK_ROOT
+    export PATH="$build_tools_root:$PATH"
 
     log_info "使用 Android SDK: $ANDROID_HOME"
     log_info "使用 Android NDK: $ANDROID_NDK_ROOT"
+    log_info "使用 android.jar: $android_jar"
+    log_info "使用 build-tools: $build_tools_root"
 
     ensure_cargo_apk
+
+    log_info "编译 Android Java 源码..."
+    bash scripts/build-android-java.sh "$android_jar"
 
     read -r -a BUILD_TARGETS <<< "${ANDROID_BUILD_TARGETS:-$DEFAULT_TARGETS}"
     log_info "添加 Android Rust targets..."

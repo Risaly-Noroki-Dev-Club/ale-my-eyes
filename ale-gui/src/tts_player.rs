@@ -1,12 +1,16 @@
 #[allow(unused_variables)]
 pub fn play_audio(audio_data: &[u8]) -> Result<(), String> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         play_audio_desktop(audio_data)
     }
     #[cfg(target_os = "android")]
     {
         play_audio_android(audio_data)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        crate::tts_player_ios::play_audio(audio_data)
     }
 }
 

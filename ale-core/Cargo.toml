@@ -11,7 +11,6 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 tts = { version = "0.25", optional = true }
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic"], optional = true }
-ndarray = { version = "0.15", optional = true }
 image = "0.25"
 whisper-rs = { version = "0.16", optional = true }
 tokio = { version = "1", features = ["full"] }
@@ -38,6 +37,6 @@ dirs = "5"
 default = ["cloud"]
 tts = ["dep:tts"]
 cloud = []
-local-inference = ["tts", "dep:ort", "dep:ndarray", "dep:whisper-rs"]
+local-inference = ["tts", "dep:ort", "dep:whisper-rs"]
 cloud-inference = ["cloud"]
 adaptive = ["local-inference", "cloud-inference"]

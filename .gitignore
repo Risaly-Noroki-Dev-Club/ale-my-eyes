@@ -21,6 +21,10 @@ Thumbs.db
 *.dylib
 *.apk
 *.aab
+/ale-my-eyes-android/
+/ale-my-eyes-android.zip
+/ale-my-eyes-android.tar.gz
+ale-gui/android/build/
 
 # Models
 models/downloaded/

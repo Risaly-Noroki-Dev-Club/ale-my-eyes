@@ -9,10 +9,25 @@ mod android;
 #[cfg(target_os = "android")]
 pub mod camera;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "android")]
+pub mod android_automation;
+
+#[cfg(target_os = "ios")]
+mod ios;
+
+#[cfg(target_os = "ios")]
+pub mod camera_ios;
+
+#[cfg(target_os = "ios")]
+pub mod automation_ios;
+
+#[cfg(target_os = "ios")]
+pub mod tts_player_ios;
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod screen_capture;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod automation;
 
 use ale_core::actions::ActionPlan;
@@ -35,12 +50,18 @@ pub struct AppState {
     auto_speak: bool,
     vad: VoiceActivityDetector,
     vad_active: bool,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     screen_capture: Option<screen_capture::ScreenCapture>,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     automation: Option<automation::AutomationEngine>,
     #[cfg(target_os = "android")]
     camera: Option<camera::AndroidCamera>,
+    #[cfg(target_os = "android")]
+    android_automation: Option<android_automation::AndroidAutomationEngine>,
+    #[cfg(target_os = "ios")]
+    camera: Option<camera_ios::IosCamera>,
+    #[cfg(target_os = "ios")]
+    automation: Option<automation_ios::IosAutomationEngine>,
     pending_plan: Option<ActionPlan>,
 }
 
@@ -60,18 +81,28 @@ impl AppState {
             auto_speak: true,
             vad: VoiceActivityDetector::with_default_config(),
             vad_active: false,
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             screen_capture: None,
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             automation: None,
             #[cfg(target_os = "android")]
             camera: None,
+            #[cfg(target_os = "android")]
+            android_automation: None,
+            #[cfg(target_os = "ios")]
+            camera: None,
+            #[cfg(target_os = "ios")]
+            automation: None,
             pending_plan: None,
         }
     }
 }
 
 pub fn setup_app(app: &AppWindow) {
+    // 在 Android 上启用移动端触控优化
+    #[cfg(target_os = "android")]
+    app.set_is_mobile(true);
+
     let state = Arc::new(Mutex::new(AppState::new()));
     let app_weak = app.as_weak();
 
@@ -100,7 +131,7 @@ pub fn setup_app(app: &AppWindow) {
                     app.set_status_text("就绪".into());
                     app.set_status_type("ready".into());
 
-                    initialize_platform_services(&mut st);
+                    initialize_platform_services(&mut st, &app);
 
                     // Auto-start continuous listening
                     start_continuous_listening(&mut st, &app);
@@ -199,13 +230,13 @@ pub fn setup_app(app: &AppWindow) {
 
                     // Get image (screen or camera)
                     let image_data: Option<Vec<u8>> = {
-                        #[cfg(not(target_os = "android"))]
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         {
                             st.screen_capture
                                 .as_ref()
                                 .and_then(|sc| sc.latest_frame_jpeg())
                         }
-                        #[cfg(target_os = "android")]
+                        #[cfg(any(target_os = "android", target_os = "ios"))]
                         {
                             st.camera.as_ref().and_then(|cam| cam.latest_frame_jpeg(80))
                         }
@@ -288,15 +319,18 @@ pub fn setup_app(app: &AppWindow) {
                 app.set_status_type("processing".into());
 
                 // Get screen image
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 let image_data = {
                     let st = state.lock().await;
                     st.screen_capture
                         .as_ref()
                         .and_then(|sc| sc.latest_frame_jpeg())
                 };
-                #[cfg(target_os = "android")]
-                let image_data: Option<Vec<u8>> = None;
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                let image_data = {
+                    let st = state.lock().await;
+                    st.camera.as_ref().and_then(|cam| cam.latest_frame_jpeg(80))
+                };
 
                 handle_question_response(
                     &state,
@@ -327,7 +361,7 @@ pub fn setup_app(app: &AppWindow) {
             spawn_local_task(async move {
                 let mut st = state.lock().await;
                 if let Some(plan) = st.pending_plan.take() {
-                    #[cfg(not(target_os = "android"))]
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
                         if let Some(ref mut ae) = st.automation {
                             match ae.execute_plan(&plan) {
@@ -359,16 +393,94 @@ pub fn setup_app(app: &AppWindow) {
                             app.set_status_type("error".into());
                         }
                     }
+                    #[cfg(target_os = "ios")]
+                    {
+                        if let Some(ref ae) = st.automation {
+                            match ae.execute_plan(&plan) {
+                                Ok(result) => {
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!(
+                                        "执行完成: {} 步",
+                                        result.actions_executed
+                                    ));
+                                }
+                                Err(e) => {
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!("执行失败: {}", e));
+                                    app.set_status_type("error".into());
+                                }
+                            }
+                        } else {
+                            let Some(app) = app_weak.upgrade() else {
+                                return;
+                            };
+                            app.set_show_confirmation(false);
+                            app.set_status_text("iOS 自动化引擎不可用".into());
+                            app.set_status_type("error".into());
+                        }
+                    }
                     #[cfg(target_os = "android")]
                     {
-                        let Some(app) = app_weak.upgrade() else {
-                            return;
-                        };
-                        app.set_show_confirmation(false);
-                        app.set_status_text(slint::format!(
-                            "Android 暂不支持执行 {} 个桌面自动化动作",
-                            plan.actions.len()
-                        ));
+                        if let Some(ref android_auto) = st.android_automation {
+                            match android_auto.is_accessibility_enabled() {
+                                Ok(true) => {
+                                    // 无障碍服务已启用，执行自动化
+                                    match android_auto.execute_plan(&plan) {
+                                        Ok(result) => {
+                                            let Some(app) = app_weak.upgrade() else {
+                                                return;
+                                            };
+                                            app.set_show_confirmation(false);
+                                            app.set_status_text(slint::format!(
+                                                "执行完成: {} 步",
+                                                result.actions_executed
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let Some(app) = app_weak.upgrade() else {
+                                                return;
+                                            };
+                                            app.set_show_confirmation(false);
+                                            app.set_status_text(slint::format!("执行失败: {}", e));
+                                            app.set_status_type("error".into());
+                                        }
+                                    }
+                                }
+                                Ok(false) => {
+                                    // 无障碍服务未启用，提示用户
+                                    let _ = android_auto.open_accessibility_settings();
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(
+                                        "请先在系统设置中启用 Ale, My Eyes! 无障碍服务".into(),
+                                    );
+                                    app.set_status_type("warning".into());
+                                }
+                                Err(e) => {
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!("无障碍检查失败: {}", e));
+                                    app.set_status_type("error".into());
+                                }
+                            }
+                        } else {
+                            let Some(app) = app_weak.upgrade() else {
+                                return;
+                            };
+                            app.set_show_confirmation(false);
+                            app.set_status_text("Android 自动化引擎未初始化".into());
+                            app.set_status_type("error".into());
+                        }
                     }
                 }
             });
@@ -384,6 +496,25 @@ pub fn setup_app(app: &AppWindow) {
             };
             app.set_show_confirmation(false);
             app.set_confirmation_text("".into());
+        });
+    }
+
+    // Open accessibility settings (Android only)
+    #[cfg(target_os = "android")]
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_open_accessibility_settings(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            spawn_local_task(async move {
+                let st = state.lock().await;
+                if let Some(ref android_auto) = st.android_automation {
+                    if let Err(e) = android_auto.open_accessibility_settings() {
+                        tracing::error!("Failed to open accessibility settings: {}", e);
+                    }
+                }
+            });
         });
     }
 
@@ -585,8 +716,10 @@ fn spawn_local_task(future: impl Future<Output = ()> + 'static) {
     }
 }
 
-fn initialize_platform_services(st: &mut AppState) {
-    #[cfg(not(target_os = "android"))]
+fn initialize_platform_services(st: &mut AppState, app: &AppWindow) {
+    let _ = app; // used on Android for accessibility prompt
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let sc = screen_capture::ScreenCapture::new(screen_capture::CaptureConfig::default());
         if let Err(e) = sc.start() {
@@ -609,6 +742,56 @@ fn initialize_platform_services(st: &mut AppState) {
         } else {
             st.camera = Some(cam);
         }
+
+        // 初始化 Android 自动化引擎
+        let mut android_auto = android_automation::AndroidAutomationEngine::new(
+            android_automation::AndroidAutomationConfig::default(),
+        );
+        match android_auto.init() {
+            Ok(()) => {
+                tracing::info!("Android automation engine initialized");
+                // 检查无障碍服务状态
+                match android_auto.is_accessibility_enabled() {
+                    Ok(true) => {
+                        tracing::info!("Accessibility service is enabled");
+                        app.set_show_accessibility_prompt(false);
+                    }
+                    Ok(false) => {
+                        tracing::warn!("Accessibility service is NOT enabled - showing prompt");
+                        app.set_show_accessibility_prompt(true);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to check accessibility status: {}", e);
+                        app.set_show_accessibility_prompt(true);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Android automation engine init failed: {}", e);
+                app.set_show_accessibility_prompt(true);
+            }
+        }
+        st.android_automation = Some(android_auto);
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        // 初始化 iOS 相机
+        let mut cam = camera_ios::IosCamera::new(camera_ios::CameraConfig::default());
+        if let Err(e) = cam.start() {
+            tracing::warn!("iOS camera failed to start: {}", e);
+        } else {
+            st.camera = Some(cam);
+        }
+
+        // 初始化 iOS 自动化引擎（有限支持）
+        match automation_ios::IosAutomationEngine::new(automation_ios::AutomationConfig::default())
+        {
+            Ok(ae) => st.automation = Some(ae),
+            Err(e) => tracing::warn!("iOS automation engine failed: {}", e),
+        }
+
+        tracing::info!("iOS platform services initialized (limited automation support)");
     }
 }
 

@@ -16,8 +16,8 @@ image = "0.25"
 tracing = "0.1"
 anyhow = "1"
 
-# Desktop-only dependencies
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Desktop-only dependencies (Linux, Windows, macOS)
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 slint = "1.16"
 cpal = "0.15"
 rodio = "0.19"
@@ -32,6 +32,14 @@ slint = { version = "1.16", features = ["backend-android-activity-06"] }
 oboe = "0.6"
 jni = "0.21"
 ndk-context = "0.1"
+
+# iOS-only dependencies
+[target.'cfg(target_os = "ios")'.dependencies]
+slint = "1.16"
+cpal = "0.15"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-av-foundation = "0.3"
 
 [[bin]]
 name = "ale-gui"
@@ -69,3 +77,41 @@ name = "android.permission.WRITE_EXTERNAL_STORAGE"
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.CAMERA"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.FOREGROUND_SERVICE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.FOREGROUND_SERVICE_MICROPHONE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WAKE_LOCK"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+
+# Accessibility Service
+[[package.metadata.android.application.service]]
+name = "AleAccessibilityService"
+label = "Ale, My Eyes! 自动化服务"
+permission = "android.permission.BIND_ACCESSIBILITY_SERVICE"
+exported = "true"
+
+[[package.metadata.android.application.service.meta_data]]
+name = "android.accessibilityservice"
+resource = "@xml/accessibility_service_config"
+
+# Application metadata for JNI bridge initialization
+[[package.metadata.android.application.meta_data]]
+name = "com.alemyeyes.automation.bridge_initialized"
+value = "true"
+
+# Foreground Service (persistent notification + wake lock)
+[[package.metadata.android.application.service]]
+name = "AleForegroundService"
+label = "Ale, My Eyes! 监听服务"
+foreground_service_type = "microphone|mediaPlayback"
+exported = "false"
