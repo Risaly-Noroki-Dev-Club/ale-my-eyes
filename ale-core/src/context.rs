@@ -243,23 +243,32 @@ impl ContextManager {
     ) -> Vec<CloudMessage> {
         let mut messages = Vec::new();
 
-        // 1. 系统提示（含长期记忆）
-        let mut system = self.system_prompt.clone();
-        let memories = self.relevant_memories(current_question, 8);
-        if !memories.is_empty() {
-            system.push_str("\n\n用户相关记忆：\n");
-            for mem in memories {
-                system.push_str(&format!("- {}\n", mem.content));
-            }
-        }
         messages.push(CloudMessage {
             role: "system".to_string(),
-            content: system,
+            content: self.system_prompt.clone(),
         });
 
-        // 2. 视觉上下文（最近帧摘要）
+        if let Some(ref summary) = self.conversation_summary {
+            messages.push(CloudMessage {
+                role: "system".to_string(),
+                content: format!("之前的对话摘要：{}", summary),
+            });
+        }
+
+        for entry in self.conversation.iter().rev().take(10).rev() {
+            let role = match entry.role {
+                Role::User => "user",
+                Role::Assistant => "assistant",
+                Role::System => "system",
+            };
+            messages.push(CloudMessage {
+                role: role.to_string(),
+                content: entry.content.clone(),
+            });
+        }
+
         if !self.visual_memory.is_empty() {
-            let mut visual_context = String::from("最近的画面变化：\n");
+            let mut visual_context = String::from("##最近的画面变化\n");
             for (i, frame) in self.visual_memory.iter().rev().take(2).enumerate() {
                 visual_context.push_str(&format!(
                     "{}. [{}] {}\n",
@@ -271,34 +280,27 @@ impl ContextManager {
                     frame.description
                 ));
                 if !frame.key_elements.is_empty() {
-                    visual_context
-                        .push_str(&format!("   关键元素: {}\n", frame.key_elements.join(", ")));
+                    visual_context.push_str(&format!(
+                        "   关键元素: {}\n",
+                        frame.key_elements.join(", ")
+                    ));
                 }
             }
             messages.push(CloudMessage {
-                role: "system".to_string(),
+                role: "user",
                 content: visual_context,
             });
         }
 
-        // 3. 对话摘要
-        if let Some(ref summary) = self.conversation_summary {
+        let memories = self.relevant_memories(current_question, 8);
+        if !memories.is_empty() {
+            let mut mem_text = String::from("用户相关记忆：\n");
+            for mem in memories {
+                mem_text.push_str(&format!("- {}\n", mem.content));
+            }
             messages.push(CloudMessage {
-                role: "system".to_string(),
-                content: format!("之前的对话摘要：{}", summary),
-            });
-        }
-
-        // 4. 最近对话
-        for entry in self.conversation.iter().rev().take(10).rev() {
-            let role = match entry.role {
-                Role::User => "user",
-                Role::Assistant => "assistant",
-                Role::System => "system",
-            };
-            messages.push(CloudMessage {
-                role: role.to_string(),
-                content: entry.content.clone(),
+                role: "system",
+                content: mem_text,
             });
         }
 
