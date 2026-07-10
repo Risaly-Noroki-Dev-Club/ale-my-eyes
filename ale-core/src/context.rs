@@ -287,7 +287,7 @@ impl ContextManager {
                 }
             }
             messages.push(CloudMessage {
-                role: "user",
+                role: "user".to_string(),
                 content: visual_context,
             });
         }
@@ -299,7 +299,7 @@ impl ContextManager {
                 mem_text.push_str(&format!("- {}\n", mem.content));
             }
             messages.push(CloudMessage {
-                role: "system",
+                role: "system".to_string(),
                 content: mem_text,
             });
         }
