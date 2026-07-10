@@ -35,7 +35,6 @@ export component AppWindow inherits Window {
     in-out property <bool> auto-speak: true;
     in-out property <bool> show-api-key: false;
     in-out property <string> config-path: "";
-    in-out property <bool> show-accessibility-prompt: false;
     // 由 Rust 侧根据 target_os 设置
     in-out property <bool> is-mobile: false;
 
@@ -53,7 +52,6 @@ export component AppWindow inherits Window {
     callback toggle-api-key-visible();
     callback save-settings();
     callback test-connection();
-    callback open-accessibility-settings();
 
     // 将 is-mobile 传递给 AppTheme 全局单例
     init => {
@@ -79,13 +77,11 @@ export component AppWindow inherits Window {
         session-tokens: root.session-tokens;
         max-tokens-budget: root.max-tokens-budget;
         text-input: root.text-input;
-        show-accessibility-prompt: root.show-accessibility-prompt;
 
         text-submitted(text) => { root.text-submitted(text); }
         confirm-action => { root.confirm-action(); }
         cancel-action => { root.cancel-action(); }
         open-settings => { root.open-settings(); }
-        open-accessibility-settings => { root.open-accessibility-settings(); }
     }
 
     if root.show-settings: SettingsPopup {

@@ -15,13 +15,11 @@ export component CompactScreen inherits Rectangle {
     in property <int> session-tokens: 0;
     in property <int> max-tokens-budget: 4000;
     in property <string> text-input: "";
-    in property <bool> show-accessibility-prompt: false;
 
     callback text-submitted(string);
     callback confirm-action();
     callback cancel-action();
     callback open-settings();
-    callback open-accessibility-settings();
 
     background: Palette.background;
 
@@ -70,49 +68,6 @@ export component CompactScreen inherits Rectangle {
 
                 settings-touch := TouchArea {
                     clicked => { root.open-settings(); }
-                }
-            }
-        }
-
-        // 无障碍服务提示
-        if root.show-accessibility-prompt : Rectangle {
-            height: AppTheme.touch-min + 8px;
-            background: Palette.accent-background.transparentize(0.85);
-            border-radius: 8px;
-            border-width: 1px;
-            border-color: Palette.accent-background;
-
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 12px;
-
-                Text {
-                    text: "需要启用无障碍服务才能执行自动化操作";
-                    font-size: AppTheme.base-font - 2px;
-                    color: Palette.foreground;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    wrap: word-wrap;
-                }
-
-                Rectangle {
-                    width: 80px;
-                    height: AppTheme.touch-min;
-                    border-radius: 8px;
-                    background: Palette.accent-background;
-
-                    Text {
-                        text: "启用";
-                        font-size: AppTheme.base-font;
-                        color: Palette.accent-foreground;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-
-                    TouchArea {
-                        clicked => { root.open-accessibility-settings(); }
-                    }
                 }
             }
         }

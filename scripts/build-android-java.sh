@@ -44,6 +44,7 @@ echo "使用 android.jar: $ANDROID_JAR"
 
 # 清理旧的编译产物
 rm -rf "$CLASSES_DIR"
+rm -f "$BUILD_DIR/classes.dex"
 mkdir -p "$CLASSES_DIR"
 
 # 查找所有 Java 源文件

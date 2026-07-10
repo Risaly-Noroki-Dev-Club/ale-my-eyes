@@ -1,10 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Ale, My Eyes!</string>
-    <string name="accessibility_service_description">Ale, My Eyes! 需要无障碍权限来执行自动化操作，包括点击、滚动、输入文本等。这是应用正常运行所必需的。</string>
-    <string name="foreground_service_channel_name">Ale, My Eyes! 服务</string>
-    <string name="foreground_service_channel_description">保持 Ale, My Eyes! 在后台持续监听语音指令</string>
-    <string name="foreground_notification_title">Ale, My Eyes!</string>
-    <string name="foreground_notification_listening">正在监听语音指令...</string>
-    <string name="foreground_notification_stop">停止</string>
 </resources>
