@@ -94,6 +94,37 @@ impl Default for AudioConfig {
     }
 }
 
+/// ASR 语音识别配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AsrConfig {
+    /// Whisper 采样策略: "greedy" 或 "beam"
+    pub sampling_strategy: String,
+    /// Beam search 宽度 (仅 beam 模式生效)
+    pub beam_size: u32,
+    /// 初始提示词，帮助模型理解上下文
+    pub initial_prompt: String,
+    /// 解码温度 (0.0 = 确定性, 越高越随机)
+    pub temperature: f32,
+    /// 强制语言 (空字符串 = auto)
+    pub language: String,
+    /// 弱语音模式：降低 VAD 阈值、延长静默等待
+    pub weak_voice_mode: bool,
+}
+
+impl Default for AsrConfig {
+    fn default() -> Self {
+        Self {
+            sampling_strategy: "greedy".to_string(),
+            beam_size: 3,
+            initial_prompt: String::new(),
+            temperature: 0.0,
+            language: String::new(),
+            weak_voice_mode: false,
+        }
+    }
+}
+
 /// 界面配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -127,6 +158,7 @@ pub struct AppConfig {
     pub models: ModelsConfig,
     pub inference: InferenceConfig,
     pub audio: AudioConfig,
+    pub asr: AsrConfig,
     pub ui: UiConfig,
 }
 
@@ -205,6 +237,11 @@ impl ConfigManager {
         self.config.ui = config;
     }
 
+    /// 更新 ASR 配置
+    pub fn update_asr(&mut self, config: AsrConfig) {
+        self.config.asr = config;
+    }
+
     /// 重置为默认配置
     pub fn reset_to_default(&mut self) {
         self.config = AppConfig::default();
@@ -232,6 +269,9 @@ impl ConfigManager {
                 self.config.inference.mode, valid_modes
             )));
         }
+
+        // 验证 ASR 配置
+        ConfigValidator::validate_asr(&self.config.asr)?;
 
         Ok(())
     }
@@ -401,11 +441,45 @@ impl ConfigValidator {
         Ok(())
     }
 
+    /// 验证 ASR 配置
+    pub fn validate_asr(config: &AsrConfig) -> Result<()> {
+        let valid_strategies = ["greedy", "beam"];
+        if !valid_strategies.contains(&config.sampling_strategy.as_str()) {
+            return Err(AleError::ConfigError(format!(
+                "Invalid sampling strategy: '{}'. Must be one of: {:?}",
+                config.sampling_strategy, valid_strategies
+            )));
+        }
+
+        if config.beam_size == 0 {
+            return Err(AleError::ConfigError(
+                "Beam size must be greater than 0".to_string(),
+            ));
+        }
+
+        if config.beam_size > 10 {
+            return Err(AleError::ConfigError(format!(
+                "Beam size {} is too large (max 10)",
+                config.beam_size
+            )));
+        }
+
+        if !config.temperature.is_finite() || config.temperature < 0.0 || config.temperature > 2.0 {
+            return Err(AleError::ConfigError(format!(
+                "Temperature must be a finite number in [0.0, 2.0], got {}",
+                config.temperature
+            )));
+        }
+
+        Ok(())
+    }
+
     /// 验证完整配置
     pub fn validate_all(config: &AppConfig) -> Result<()> {
         Self::validate_cloud_api(&config.cloud_api)?;
         Self::validate_models(&config.models)?;
         Self::validate_inference(&config.inference)?;
+        Self::validate_asr(&config.asr)?;
 
         if config.ui.font_size == 0 {
             return Err(AleError::ConfigError(
@@ -569,5 +643,56 @@ mod tests {
         assert_eq!(config.inference.mode, "adaptive");
         assert_eq!(config.audio.sample_rate, 16000);
         assert!(config.ui.auto_speak);
+    }
+
+    #[test]
+    fn test_validate_asr_valid_defaults() {
+        let config = AsrConfig::default();
+        assert!(ConfigValidator::validate_asr(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_asr_rejects_bad_strategy() {
+        let mut config = AsrConfig::default();
+        config.sampling_strategy = "top_k".to_string();
+        assert!(ConfigValidator::validate_asr(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_asr_rejects_zero_beam_size() {
+        let mut config = AsrConfig::default();
+        config.sampling_strategy = "beam".to_string();
+        config.beam_size = 0;
+        assert!(ConfigValidator::validate_asr(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_asr_rejects_nan_temperature() {
+        let mut config = AsrConfig::default();
+        config.temperature = f32::NAN;
+        assert!(ConfigValidator::validate_asr(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_asr_rejects_excessive_temperature() {
+        let mut config = AsrConfig::default();
+        config.temperature = 5.0;
+        assert!(ConfigValidator::validate_asr(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_asr_rejects_large_beam_size() {
+        let mut config = AsrConfig::default();
+        config.sampling_strategy = "beam".to_string();
+        config.beam_size = 20;
+        assert!(ConfigValidator::validate_asr(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_all_includes_asr() {
+        let mut config = AppConfig::default();
+        config.cloud_api.api_key = "sk-test".to_string();
+        config.asr.temperature = f32::INFINITY;
+        assert!(ConfigValidator::validate_all(&config).is_err());
     }
 }

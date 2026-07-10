@@ -1,6 +1,7 @@
 use crate::{AleError, Result};
 use async_trait::async_trait;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -19,6 +20,11 @@ pub struct WhisperRecognizer {
     ctx: Option<WhisperContext>,
     language: Option<String>,
     n_threads: i32,
+    use_beam_search: bool,
+    beam_size: i32,
+    initial_prompt: Option<String>,
+    temperature: f32,
+    is_first_utterance: AtomicBool,
 }
 
 impl WhisperRecognizer {
@@ -34,7 +40,12 @@ impl WhisperRecognizer {
             model_path: model_path.to_path_buf(),
             ctx: None,
             language: None,
-            n_threads: num_cpus().min(8) as i32,
+            n_threads: num_cpus().min(4) as i32,
+            use_beam_search: false,
+            beam_size: 3,
+            initial_prompt: None,
+            temperature: 0.0,
+            is_first_utterance: AtomicBool::new(true),
         })
     }
 
@@ -45,6 +56,22 @@ impl WhisperRecognizer {
 
     pub fn with_threads(mut self, n: i32) -> Self {
         self.n_threads = n;
+        self
+    }
+
+    pub fn with_beam_search(mut self, enabled: bool, beam_size: i32) -> Self {
+        self.use_beam_search = enabled;
+        self.beam_size = beam_size.clamp(1, 10);
+        self
+    }
+
+    pub fn with_initial_prompt(mut self, prompt: Option<String>) -> Self {
+        self.initial_prompt = prompt;
+        self
+    }
+
+    pub fn with_temperature(mut self, temp: f32) -> Self {
+        self.temperature = temp.clamp(0.0, 1.0);
         self
     }
 
@@ -74,7 +101,17 @@ impl WhisperRecognizer {
             .create_state()
             .map_err(|e| AleError::AsrError(format!("Failed to create whisper state: {e}")))?;
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // 默认 Greedy（快），仅在明确启用时用 BeamSearch（慢但更准）
+        let strategy = if self.use_beam_search {
+            SamplingStrategy::BeamSearch {
+                beam_size: self.beam_size,
+                patience: -1.0,
+            }
+        } else {
+            SamplingStrategy::Greedy { best_of: 1 }
+        };
+
+        let mut params = FullParams::new(strategy);
         params.set_n_threads(self.n_threads);
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -82,6 +119,16 @@ impl WhisperRecognizer {
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
+        params.set_temperature(self.temperature);
+
+        let is_first = self.is_first_utterance.swap(false, Ordering::Relaxed);
+        params.set_no_context(is_first);
+
+        if let Some(ref prompt) = self.initial_prompt {
+            if !prompt.is_empty() {
+                params.set_initial_prompt(prompt);
+            }
+        }
 
         if let Some(ref lang) = self.language {
             params.set_language(Some(lang));
@@ -111,11 +158,16 @@ impl WhisperRecognizer {
 #[async_trait]
 impl SpeechRecognizer for WhisperRecognizer {
     async fn transcribe(&self, audio_data: &[u8]) -> Result<String> {
-        let samples = parse_audio_to_f32_mono(audio_data, WHISPER_SAMPLE_RATE)?;
+        let mut samples = parse_audio_to_f32_mono(audio_data, WHISPER_SAMPLE_RATE)?;
 
         if samples.is_empty() {
             return Err(AleError::AsrError("No audio samples found".to_string()));
         }
+
+        // 轻量预处理：先 RMS 归一化再噪声门限
+        // 先 normalize 让弱语音达到可听范围，再 gate 消除归一化后仍低于阈值的底噪
+        normalize_rms(&mut samples, 0.1);
+        apply_noise_gate(&mut samples, 0.01);
 
         let ctx = self.ctx.as_ref().ok_or_else(|| {
             AleError::AsrError("Whisper model not loaded, call load_model() first".to_string())
@@ -281,6 +333,42 @@ fn num_cpus() -> usize {
         .unwrap_or(4)
 }
 
+// ── 轻量音频预处理 ────────────────────────────────────────────
+
+/// 噪声门限：低于 threshold 的样本直接置零
+/// 开销：单次遍历 O(n)，消除底噪对 Whisper 解码的干扰
+fn apply_noise_gate(samples: &mut [f32], threshold: f32) {
+    for s in samples.iter_mut() {
+        if s.abs() < threshold {
+            *s = 0.0;
+        }
+    }
+}
+
+/// RMS 归一化：将音频整体能量缩放到目标 RMS 级别
+/// 开销：两次遍历 O(n)，让弱语音达到 Whisper 期望的音量范围
+fn normalize_rms(samples: &mut [f32], target_rms: f32) {
+    if samples.is_empty() {
+        return;
+    }
+    // 计算 RMS
+    let sum_sq: f64 = samples.iter().map(|s| (*s as f64) * (*s as f64)).sum();
+    let rms = (sum_sq / samples.len() as f64).sqrt() as f32;
+
+    if rms < 1e-6 {
+        return; // 全静音，不处理
+    }
+
+    let gain = target_rms / rms;
+
+    // 限制增益范围，避免放大底噪
+    let gain = gain.clamp(0.5, 20.0);
+
+    for s in samples.iter_mut() {
+        *s = (*s * gain).clamp(-1.0, 1.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,5 +401,75 @@ mod tests {
         let samples: Vec<f32> = (0..48000).map(|i| (i as f32).sin()).collect();
         let result = resample(&samples, 48000, 16000);
         assert_eq!(result.len(), 16000);
+    }
+
+    #[test]
+    fn test_noise_gate_silences_low_amplitude() {
+        let mut samples = vec![0.001, 0.5, -0.002, -0.8, 0.009];
+        apply_noise_gate(&mut samples, 0.01);
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[2], 0.0);
+        assert_eq!(samples[4], 0.0);
+        assert!((samples[1] - 0.5).abs() < 1e-6);
+        assert!((samples[3] - (-0.8)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_normalize_rms_boosts_weak_signal() {
+        let mut samples = vec![0.001; 1000]; // 非常弱的信号
+        normalize_rms(&mut samples, 0.1);
+        // 归一化后应该有显著提升
+        let new_rms: f32 = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        assert!(new_rms > 0.05, "RMS should be boosted, got {}", new_rms);
+    }
+
+    #[test]
+    fn test_normalize_rms_does_not_amplify_silence() {
+        let mut samples = vec![0.0; 1000];
+        normalize_rms(&mut samples, 0.1);
+        assert!(samples.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_weak_voice_preprocess_does_not_zero_speech() {
+        // Simulate weak voice: samples around 0.005, below noise gate threshold 0.01
+        let mut samples: Vec<f32> = (0..1000)
+            .map(|i| 0.005 * (i as f32 * 0.1).sin())
+            .collect();
+        let rms_before: f32 =
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        assert!(rms_before < 0.01, "precondition: signal below gate threshold");
+
+        // Correct order: normalize first, then gate
+        normalize_rms(&mut samples, 0.1);
+        apply_noise_gate(&mut samples, 0.01);
+
+        let rms_after: f32 =
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        assert!(
+            rms_after > 0.05,
+            "weak voice should survive normalization then gating, got RMS {}",
+            rms_after
+        );
+    }
+
+    #[test]
+    fn test_weak_voice_preprocess_wrong_order_kills_signal() {
+        // Demonstrate that the old order (gate then normalize) kills weak voice
+        let mut samples: Vec<f32> = (0..1000)
+            .map(|i| 0.005 * (i as f32 * 0.1).sin())
+            .collect();
+
+        // Wrong order: gate first
+        apply_noise_gate(&mut samples, 0.01);
+        normalize_rms(&mut samples, 0.01);
+
+        let rms_after: f32 =
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        assert!(
+            rms_after < 1e-6,
+            "old order should zero the signal, got RMS {}",
+            rms_after
+        );
     }
 }
