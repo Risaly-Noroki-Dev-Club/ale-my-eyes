@@ -160,7 +160,7 @@ async fn apply_tool_calls(state: &Arc<Mutex<AppState>>, app: &AppWindow, calls: 
     }
 }
 
-fn automation_tools() -> Vec<serde_json::Value> {
+pub(crate) fn automation_tools() -> Vec<serde_json::Value> {
     vec![serde_json::json!({
         "type": "function",
         "function": {

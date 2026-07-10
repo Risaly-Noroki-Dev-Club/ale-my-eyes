@@ -32,6 +32,7 @@ futures = "0.3"
 serde_urlencoded = "0.7"
 url = "2"
 dirs = "5"
+urlencoding = "2"
 
 [features]
 default = ["cloud"]

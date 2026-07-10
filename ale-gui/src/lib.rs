@@ -25,9 +25,17 @@ pub mod screen_capture;
 pub mod automation;
 
 mod platform;
+mod remote_crypto;
+
+mod remote_client;
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod remote_server;
 
 use ale_core::actions::ActionPlan;
 use ale_core::config::AppConfig;
+#[cfg(target_os = "android")]
+use ale_core::remote::CommandInput;
 use ale_core::vad::{VadConfig, VadState, VoiceActivityDetector};
 use ale_core::{AleEngine, AleEngineFactory};
 use conversation::handle_question_response;
@@ -36,6 +44,9 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
+
+#[cfg(target_os = "android")]
+use base64::Engine;
 
 slint::include_modules!();
 
@@ -50,6 +61,10 @@ pub struct AppState {
     vad_frame_count: u64,
     platform: Option<Box<dyn PlatformService>>,
     pending_plan: Option<ActionPlan>,
+    #[cfg(target_os = "android")]
+    pending_remote_request_id: Option<String>,
+    #[cfg(target_os = "android")]
+    remote_client: Option<remote_client::RemoteClient>,
 }
 
 impl Default for AppState {
@@ -71,6 +86,10 @@ impl AppState {
             vad_frame_count: 0,
             platform: None,
             pending_plan: None,
+            #[cfg(target_os = "android")]
+            pending_remote_request_id: None,
+            #[cfg(target_os = "android")]
+            remote_client: None,
         }
     }
 }
@@ -82,6 +101,44 @@ pub fn setup_app(app: &AppWindow) {
 
     let state = Arc::new(Mutex::new(AppState::new()));
     let app_weak = app.as_weak();
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        spawn_local_task(async move {
+            loop {
+                let engine = { state.lock().await.engine.clone() };
+                if let Some(engine) = engine {
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
+                    match remote_server::start(engine).await {
+                        Ok(handle) => {
+                            app.set_remote_connected(true);
+                            app.set_remote_status(slint::format!(
+                                "桌面端监听中: {}",
+                                handle.pairing.websocket_url()
+                            ));
+                            app.set_remote_address(handle.pairing.websocket_url().into());
+                            app.set_remote_code(handle.pairing.code.clone().into());
+                            app.set_remote_pairing_info(slint::format!(
+                                "配对链接: {}\n\n{}",
+                                handle.pairing.uri(),
+                                handle.qr_text
+                            ));
+                        }
+                        Err(error) => {
+                            app.set_remote_status(slint::format!("桌面端服务启动失败: {}", error));
+                            app.set_remote_connected(false);
+                        }
+                    }
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        });
+    }
 
     // Initialize engine + start monitoring
     {
@@ -224,6 +281,18 @@ pub fn setup_app(app: &AppWindow) {
 
                     drop(st);
 
+                    #[cfg(target_os = "android")]
+                    {
+                        app.set_transcription("语音已发送到桌面端".into());
+                        let wav_base64 = base64::engine::general_purpose::STANDARD.encode(&audio);
+                        handle_remote_command(&state, &app, CommandInput::AudioWav { wav_base64 })
+                            .await;
+                        app.set_is_busy(false);
+                        let mut st = state.lock().await;
+                        start_continuous_listening(&mut st, &app);
+                        return;
+                    }
+
                     // Transcribe audio
                     let transcription = {
                         let eng = engine.lock().await;
@@ -304,16 +373,23 @@ pub fn setup_app(app: &AppWindow) {
                     st.platform.as_ref().and_then(|p| p.capture_image())
                 };
 
-                handle_question_response(
-                    &state,
-                    &app,
-                    &app_weak,
-                    engine.clone(),
-                    question,
-                    image_data,
-                    auto_speak,
-                )
-                .await;
+                #[cfg(target_os = "android")]
+                {
+                    handle_remote_command(&state, &app, CommandInput::Text { text: question }).await;
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    handle_question_response(
+                        &state,
+                        &app,
+                        &app_weak,
+                        engine.clone(),
+                        question,
+                        image_data,
+                        auto_speak,
+                    )
+                    .await;
+                }
 
                 let Some(app) = app_weak.upgrade() else {
                     return;
@@ -332,6 +408,38 @@ pub fn setup_app(app: &AppWindow) {
             let app_weak = app_weak.clone();
             spawn_local_task(async move {
                 let mut st = state.lock().await;
+                #[cfg(target_os = "android")]
+                {
+                    let client = st.remote_client.clone();
+                    let request_id = st.pending_remote_request_id.take();
+                    drop(st);
+                    match (client, request_id) {
+                        (Some(client), Some(request_id)) => {
+                            match client.confirm(request_id, true).await {
+                                Ok(status) => {
+                                    let Some(app) = app_weak.upgrade() else { return };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(status.message.into());
+                                    app.set_status_type("ready".into());
+                                }
+                                Err(error) => {
+                                    let Some(app) = app_weak.upgrade() else { return };
+                                    app.set_show_confirmation(false);
+                                    app.set_status_text(slint::format!("远程执行失败: {}", error));
+                                    app.set_status_type("error".into());
+                                }
+                            }
+                        }
+                        _ => {
+                            let Some(app) = app_weak.upgrade() else { return };
+                            app.set_show_confirmation(false);
+                            app.set_status_text("未连接桌面端或没有待确认请求".into());
+                            app.set_status_type("error".into());
+                        }
+                    }
+                    return;
+                }
+
                 if let Some(plan) = st.pending_plan.take() {
                     // 统一的平台执行 — 不再需要 #[cfg] 分支
                     if let Some(ref platform) = st.platform {
@@ -490,6 +598,115 @@ pub fn setup_app(app: &AppWindow) {
             app.set_show_api_key(!app.get_show_api_key());
         });
     }
+    {
+        let app_weak = app_weak.clone();
+        app.on_remote_address_changed(move |text| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_remote_address(text);
+        });
+    }
+    {
+        let app_weak = app_weak.clone();
+        app.on_remote_code_changed(move |text| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            app.set_remote_code(text);
+        });
+    }
+    {
+        let app_weak = app_weak.clone();
+        app.on_connect_remote(move || {
+            #[cfg(target_os = "android")]
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            spawn_local_task(async move {
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                app.set_is_busy(true);
+                #[cfg(target_os = "android")]
+                {
+                let mut code = app.get_remote_code().to_string();
+                let address = app.get_remote_address().to_string();
+                let url = if address.trim().is_empty() {
+                    match remote_client::discover_first(code.clone()) {
+                        Some(info) => {
+                            app.set_remote_address(info.websocket_url().into());
+                            app.set_remote_pairing_info(info.uri().into());
+                            info.websocket_url()
+                        }
+                        None => {
+                            app.set_remote_status("未自动发现桌面端，请手动输入地址或粘贴二维码链接".into());
+                            app.set_remote_connected(false);
+                            app.set_is_busy(false);
+                            return;
+                        }
+                    }
+                } else if address.starts_with("ale-my-eyes://") {
+                    match ale_core::remote::PairingInfo::from_uri(&address) {
+                        Ok(info) => {
+                            code = info.code.clone();
+                            app.set_remote_code(code.clone().into());
+                            info.websocket_url()
+                        }
+                        Err(error) => {
+                            app.set_remote_status(slint::format!("配对链接无效: {}", error));
+                            app.set_remote_connected(false);
+                            app.set_is_busy(false);
+                            return;
+                        }
+                    }
+                } else {
+                    address
+                };
+
+                    let client = remote_client::RemoteClient::new(url.clone(), code);
+                    match client.test().await {
+                        Ok(name) => {
+                            state.lock().await.remote_client = Some(client);
+                            app.set_remote_address(url.into());
+                            app.set_remote_status(slint::format!("已加密连接: {}", name));
+                            app.set_remote_connected(true);
+                        }
+                        Err(error) => {
+                            app.set_remote_status(slint::format!("连接失败: {}", error));
+                            app.set_remote_connected(false);
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    app.set_remote_status("桌面端已经在本机监听，无需连接自己".into());
+                    app.set_remote_connected(true);
+                }
+                app.set_is_busy(false);
+            });
+        });
+    }
+    {
+        let app_weak = app_weak.clone();
+        app.on_disconnect_remote(move || {
+            #[cfg(target_os = "android")]
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            spawn_local_task(async move {
+                #[cfg(target_os = "android")]
+                {
+                    let mut st = state.lock().await;
+                    st.remote_client = None;
+                    st.pending_remote_request_id = None;
+                }
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                app.set_remote_connected(false);
+                app.set_remote_status("未连接桌面端".into());
+            });
+        });
+    }
 
     // Save settings
     {
@@ -622,6 +839,42 @@ fn apply_config_to_app(app: &AppWindow, config: &AppConfig) {
     app.set_model(config.cloud_api.model.clone().into());
     app.set_max_tokens_str(config.cloud_api.max_tokens.to_string().into());
     app.set_auto_speak(config.ui.auto_speak);
+}
+
+#[cfg(target_os = "android")]
+async fn handle_remote_command(
+    state: &Arc<Mutex<AppState>>,
+    app: &AppWindow,
+    input: CommandInput,
+) {
+    let client = { state.lock().await.remote_client.clone() };
+    let Some(client) = client else {
+        app.set_ai_response("请先在设置中连接桌面端".into());
+        app.set_status_text("未连接桌面端".into());
+        app.set_status_type("error".into());
+        return;
+    };
+
+    match client.send_command(input).await {
+        Ok(preview) => {
+            app.set_ai_response(preview.response_text.into());
+            app.set_action_steps(preview.action_steps.join("\n").into());
+            if preview.has_plan {
+                state.lock().await.pending_remote_request_id = Some(preview.request_id);
+                app.set_confirmation_text(preview.confirmation_text.into());
+                app.set_show_confirmation(true);
+            } else {
+                app.set_show_confirmation(false);
+            }
+            app.set_status_text("桌面端已返回计划".into());
+            app.set_status_type("ready".into());
+        }
+        Err(error) => {
+            app.set_ai_response(slint::format!("远程请求失败: {}", error));
+            app.set_status_text("远程请求失败".into());
+            app.set_status_type("error".into());
+        }
+    }
 }
 
 fn config_from_app(app: &AppWindow, base: &AppConfig) -> AppConfig {

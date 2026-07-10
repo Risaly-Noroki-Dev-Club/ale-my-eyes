@@ -177,6 +177,17 @@ impl ActionPlan {
         self.actions.push(action);
     }
 
+    /// 根据实际动作重新计算风险，避免信任外部模型返回的风险字段。
+    pub fn recompute_risk(&mut self) {
+        self.risk_level = self
+            .actions
+            .iter()
+            .map(Action::risk_level)
+            .max()
+            .unwrap_or(RiskLevel::Low);
+        self.requires_confirmation = self.risk_level >= RiskLevel::High;
+    }
+
     /// 获取所有操作的描述列表
     pub fn describe_steps(&self) -> Vec<String> {
         self.actions.iter().map(|a| a.describe()).collect()
@@ -200,7 +211,9 @@ impl ActionPlan {
 
 /// 从 AI 响应 JSON 解析操作计划
 pub fn parse_action_plan(json: &str) -> Result<ActionPlan, serde_json::Error> {
-    serde_json::from_str(json)
+    let mut plan: ActionPlan = serde_json::from_str(json)?;
+    plan.recompute_risk();
+    Ok(plan)
 }
 
 /// 从 OpenAI-compatible function call arguments 解析操作计划。
@@ -209,7 +222,9 @@ pub fn parse_action_plan(json: &str) -> Result<ActionPlan, serde_json::Error> {
 pub fn parse_action_plan_arguments(json: &str) -> Result<ActionPlan, serde_json::Error> {
     parse_action_plan(json).or_else(|_| {
         let value: serde_json::Value = serde_json::from_str(json)?;
-        serde_json::from_value(value["plan"].clone())
+        let mut plan: ActionPlan = serde_json::from_value(value["plan"].clone())?;
+        plan.recompute_risk();
+        Ok(plan)
     })
 }
 
@@ -310,11 +325,28 @@ mod tests {
             ],
             "risk_level": "medium",
             "explanation": "点击按钮",
-            "requires_confirmation": true
+            "requires_confirmation": false
         }"#;
 
         let plan = parse_action_plan_arguments(json).unwrap();
         assert_eq!(plan.actions.len(), 1);
+        assert_eq!(plan.risk_level, RiskLevel::Medium);
+        assert!(!plan.requires_confirmation);
+    }
+
+    #[test]
+    fn test_parse_action_plan_risk_ignores_claimed_risk() {
+        let json = r#"{
+            "actions": [
+                {"type": "file_operation", "operation": "delete", "path": "/tmp/test"}
+            ],
+            "risk_level": "low",
+            "explanation": "删除文件",
+            "requires_confirmation": false
+        }"#;
+
+        let plan = parse_action_plan_arguments(json).unwrap();
+        assert_eq!(plan.risk_level, RiskLevel::High);
         assert!(plan.requires_confirmation);
     }
 
@@ -327,12 +359,13 @@ mod tests {
                 ],
                 "risk_level": "medium",
                 "explanation": "打开记事本",
-                "requires_confirmation": true
+                "requires_confirmation": false
             }
         }"#;
 
         let plan = parse_action_plan_arguments(json).unwrap();
         assert_eq!(plan.actions.len(), 1);
         assert_eq!(plan.explanation, "打开记事本");
+        assert_eq!(plan.risk_level, RiskLevel::Medium);
     }
 }

@@ -14,7 +14,7 @@ export component CompactScreen inherits Rectangle {
     in property <bool> engine-ready: false;
     in property <int> session-tokens: 0;
     in property <int> max-tokens-budget: 4000;
-    in property <string> text-input: "";
+    in-out property <string> text-input: "";
 
     callback text-submitted(string);
     callback confirm-action();
@@ -195,6 +195,7 @@ export component CompactScreen inherits Rectangle {
                         text: root.text-input;
                         placeholder-text: "打字提问...";
                         font-size: AppTheme.base-font - 2px;
+                        edited(text) => { root.text-input = text; }
                         accepted(text) => { root.text-submitted(text); }
                     }
                 }

@@ -35,6 +35,11 @@ export component AppWindow inherits Window {
     in-out property <bool> auto-speak: true;
     in-out property <bool> show-api-key: false;
     in-out property <string> config-path: "";
+    in-out property <string> remote-address: "";
+    in-out property <string> remote-code: "";
+    in-out property <string> remote-status: "未连接桌面端";
+    in-out property <bool> remote-connected: false;
+    in-out property <string> remote-pairing-info: "";
     // 由 Rust 侧根据 target_os 设置
     in-out property <bool> is-mobile: false;
 
@@ -52,6 +57,10 @@ export component AppWindow inherits Window {
     callback toggle-api-key-visible();
     callback save-settings();
     callback test-connection();
+    callback remote-address-changed(string);
+    callback remote-code-changed(string);
+    callback connect-remote();
+    callback disconnect-remote();
 
     // 将 is-mobile 传递给 AppTheme 全局单例
     init => {
@@ -94,6 +103,11 @@ export component AppWindow inherits Window {
         show-api-key: root.show-api-key;
         is-busy: root.is-busy;
         config-path: root.config-path;
+        remote-address: root.remote-address;
+        remote-code: root.remote-code;
+        remote-status: root.remote-status;
+        remote-connected: root.remote-connected;
+        remote-pairing-info: root.remote-pairing-info;
 
         provider-changed(text) => { root.provider-changed(text); }
         api-key-changed(text) => { root.api-key-changed(text); }
@@ -104,6 +118,10 @@ export component AppWindow inherits Window {
         toggle-api-key-visible => { root.toggle-api-key-visible(); }
         save-settings => { root.save-settings(); }
         test-connection => { root.test-connection(); }
+        remote-address-changed(text) => { root.remote-address-changed(text); }
+        remote-code-changed(text) => { root.remote-code-changed(text); }
+        connect-remote => { root.connect-remote(); }
+        disconnect-remote => { root.disconnect-remote(); }
         close-settings => { root.close-settings(); }
     }
 }

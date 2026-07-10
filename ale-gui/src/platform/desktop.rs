@@ -31,7 +31,11 @@ impl DesktopPlatform {
         }
 
         // 创建自动化引擎
-        match AutomationEngine::new(AutomationConfig::default()) {
+        let automation_config = AutomationConfig {
+            require_confirmation: false,
+            ..AutomationConfig::default()
+        };
+        match AutomationEngine::new(automation_config) {
             Ok(ae) => self.automation = Some(Mutex::new(ae)),
             Err(e) => tracing::warn!("Automation engine failed: {}", e),
         }
