@@ -1,4 +1,4 @@
-use super::ExecutionResult;
+use super::{ExecutionResult, PlatformCapabilities};
 use crate::automation::{AutomationConfig, AutomationEngine};
 use crate::screen_capture::{CaptureConfig, ScreenCapture};
 use ale_core::actions::ActionPlan;
@@ -31,10 +31,7 @@ impl DesktopPlatform {
         }
 
         // 创建自动化引擎
-        let automation_config = AutomationConfig {
-            require_confirmation: false,
-            ..AutomationConfig::default()
-        };
+        let automation_config = AutomationConfig::default();
         match AutomationEngine::new(automation_config) {
             Ok(ae) => self.automation = Some(Mutex::new(ae)),
             Err(e) => tracing::warn!("Automation engine failed: {}", e),
@@ -47,7 +44,7 @@ impl super::PlatformService for DesktopPlatform {
         self.screen_capture.as_ref()?.latest_frame_jpeg()
     }
 
-    fn execute_plan(&self, plan: &ActionPlan) -> Result<ExecutionResult> {
+    fn execute_plan(&self, plan: &ActionPlan, approved: bool) -> Result<ExecutionResult> {
         let auto = self
             .automation
             .as_ref()
@@ -57,7 +54,7 @@ impl super::PlatformService for DesktopPlatform {
             .lock()
             .map_err(|e| AleError::Other(anyhow::anyhow!("自动化引擎锁失败: {}", e)))?;
 
-        let result = guard.execute_plan(plan)?;
+        let result = guard.execute_plan(plan, approved)?;
         Ok(ExecutionResult {
             actions_executed: result.actions_executed,
         })
@@ -65,5 +62,13 @@ impl super::PlatformService for DesktopPlatform {
 
     fn is_automation_ready(&self) -> bool {
         self.automation.is_some()
+    }
+
+    fn capabilities(&self) -> PlatformCapabilities {
+        PlatformCapabilities {
+            image_capture: self.screen_capture.is_some(),
+            automation: self.automation.is_some(),
+            local_microphone: true,
+        }
     }
 }

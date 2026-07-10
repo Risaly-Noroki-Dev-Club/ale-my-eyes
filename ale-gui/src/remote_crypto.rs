@@ -88,7 +88,10 @@ pub fn client_handshake_message(code: &str) -> Result<(snow::HandshakeState, Vec
     Ok((noise, message))
 }
 
-pub fn server_handshake_reply(code: &str, client_message: &[u8]) -> Result<(SecureChannel, Vec<u8>), String> {
+pub fn server_handshake_reply(
+    code: &str,
+    client_message: &[u8],
+) -> Result<(SecureChannel, Vec<u8>), String> {
     let psk = psk_from_code(code);
     let mut noise = Builder::new(noise_params()?)
         .psk(0, &psk)
@@ -104,7 +107,9 @@ pub fn server_handshake_reply(code: &str, client_message: &[u8]) -> Result<(Secu
         .write_message(&[], &mut reply)
         .map_err(|error| error.to_string())?;
     reply.truncate(len);
-    let transport = noise.into_transport_mode().map_err(|error| error.to_string())?;
+    let transport = noise
+        .into_transport_mode()
+        .map_err(|error| error.to_string())?;
     Ok((SecureChannel { transport }, reply))
 }
 
@@ -116,6 +121,8 @@ pub fn client_finish_handshake(
     noise
         .read_message(server_message, &mut scratch)
         .map_err(|error| error.to_string())?;
-    let transport = noise.into_transport_mode().map_err(|error| error.to_string())?;
+    let transport = noise
+        .into_transport_mode()
+        .map_err(|error| error.to_string())?;
     Ok(SecureChannel { transport })
 }

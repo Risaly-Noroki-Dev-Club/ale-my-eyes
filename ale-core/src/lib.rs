@@ -7,6 +7,8 @@ pub mod error;
 pub mod inference;
 pub mod manager;
 pub mod memory;
+pub mod remote;
+pub mod secret_store;
 pub mod types;
 pub mod vad;
 
@@ -102,8 +104,24 @@ impl AleEngine {
             if let Some(model_path) = model_manager.get_model_path(whisper_model_id) {
                 match asr::WhisperRecognizer::new(&model_path).await {
                     Ok(mut recognizer) => {
-                        let lang = Some(config_manager.config().ui.language.clone());
-                        recognizer = recognizer.with_language(lang);
+                        let lang = Self::map_whisper_language(
+                            &config_manager.config().ui.language,
+                            &config_manager.config().asr.language,
+                        );
+                        recognizer = recognizer
+                            .with_language(lang)
+                            .with_beam_search(
+                                config_manager.config().asr.sampling_strategy == "beam",
+                                config_manager.config().asr.beam_size as i32,
+                            )
+                            .with_temperature(config_manager.config().asr.temperature)
+                            .with_initial_prompt(
+                                if config_manager.config().asr.initial_prompt.is_empty() {
+                                    None
+                                } else {
+                                    Some(config_manager.config().asr.initial_prompt.clone())
+                                },
+                            );
                         if let Err(e) = recognizer.load_model() {
                             tracing::warn!("Failed to load whisper model weights: {}", e);
                         } else {
@@ -195,12 +213,73 @@ impl AleEngine {
         })?;
         drop(manager);
 
+        let lang = Self::map_whisper_language(
+            &self.config_manager.config().ui.language,
+            &self.config_manager.config().asr.language,
+        );
+
         let mut recognizer = asr::WhisperRecognizer::new(&model_path).await?;
-        let lang = Some(self.config_manager.config().ui.language.clone());
-        recognizer = recognizer.with_language(lang);
+        recognizer = recognizer
+            .with_language(lang)
+            .with_beam_search(
+                self.config_manager.config().asr.sampling_strategy == "beam",
+                self.config_manager.config().asr.beam_size as i32,
+            )
+            .with_temperature(self.config_manager.config().asr.temperature)
+            .with_initial_prompt(
+                if self.config_manager.config().asr.initial_prompt.is_empty() {
+                    None
+                } else {
+                    Some(self.config_manager.config().asr.initial_prompt.clone())
+                },
+            );
         recognizer.load_model()?;
         self.inference_engine.set_local_asr(recognizer);
         Ok(())
+    }
+
+    /// Load a user-provided compatible ONNX image-description model.
+    #[cfg(feature = "local-inference")]
+    pub async fn load_local_vlm(&mut self, model_path: &Path) -> Result<()> {
+        let mut model = vlm::OnnxVlm::new(model_path).await?;
+        model.load_model()?;
+        self.inference_engine.set_local_vlm(Arc::new(model));
+        Ok(())
+    }
+
+    #[cfg(feature = "local-inference")]
+    pub fn local_image_description_available(&self) -> bool {
+        self.inference_engine.local_vlm_available()
+    }
+
+    /// 将 UI 语言代码映射为 Whisper 可识别的语言代码
+    #[cfg(feature = "local-inference")]
+    fn map_whisper_language(ui_lang: &str, asr_lang: &str) -> Option<String> {
+        // ASR 配置中的语言优先
+        if !asr_lang.is_empty() {
+            return Some(asr_lang.to_string());
+        }
+        // 否则从 UI 语言映射
+        let lang = match ui_lang {
+            "zh-CN" | "zh-TW" | "zh-HK" => "zh",
+            "en-US" | "en-GB" => "en",
+            "ja-JP" => "ja",
+            "ko-KR" => "ko",
+            "fr-FR" => "fr",
+            "de-DE" => "de",
+            "es-ES" => "es",
+            "ru-RU" => "ru",
+            "pt-BR" | "pt-PT" => "pt",
+            "it-IT" => "it",
+            "nl-NL" => "nl",
+            "pl-PL" => "pl",
+            "ar-SA" => "ar",
+            "tr-TR" => "tr",
+            "vi-VN" => "vi",
+            "th-TH" => "th",
+            _ => ui_lang,
+        };
+        Some(lang.to_string())
     }
 
     /// 初始化TTS引擎（如果可用）
@@ -409,8 +488,7 @@ impl AleEngine {
 
     /// 更新配置
     pub fn update_config(&mut self, config: config::AppConfig) -> Result<()> {
-        self.config_manager.update_config(config);
-        self.config_manager.save()
+        self.config_manager.update_config(config)
     }
 
     /// 检查引擎状态

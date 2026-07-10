@@ -419,7 +419,8 @@ mod tests {
         let mut samples = vec![0.001; 1000]; // 非常弱的信号
         normalize_rms(&mut samples, 0.1);
         // 归一化后应该有显著提升
-        let new_rms: f32 = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        let new_rms: f32 =
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
         assert!(new_rms > 0.05, "RMS should be boosted, got {}", new_rms);
     }
 
@@ -433,12 +434,13 @@ mod tests {
     #[test]
     fn test_weak_voice_preprocess_does_not_zero_speech() {
         // Simulate weak voice: samples around 0.005, below noise gate threshold 0.01
-        let mut samples: Vec<f32> = (0..1000)
-            .map(|i| 0.005 * (i as f32 * 0.1).sin())
-            .collect();
+        let mut samples: Vec<f32> = (0..1000).map(|i| 0.005 * (i as f32 * 0.1).sin()).collect();
         let rms_before: f32 =
             (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
-        assert!(rms_before < 0.01, "precondition: signal below gate threshold");
+        assert!(
+            rms_before < 0.01,
+            "precondition: signal below gate threshold"
+        );
 
         // Correct order: normalize first, then gate
         normalize_rms(&mut samples, 0.1);
@@ -456,9 +458,7 @@ mod tests {
     #[test]
     fn test_weak_voice_preprocess_wrong_order_kills_signal() {
         // Demonstrate that the old order (gate then normalize) kills weak voice
-        let mut samples: Vec<f32> = (0..1000)
-            .map(|i| 0.005 * (i as f32 * 0.1).sin())
-            .collect();
+        let mut samples: Vec<f32> = (0..1000).map(|i| 0.005 * (i as f32 * 0.1).sin()).collect();
 
         // Wrong order: gate first
         apply_noise_gate(&mut samples, 0.01);

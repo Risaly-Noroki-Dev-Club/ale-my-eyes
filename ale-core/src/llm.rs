@@ -92,7 +92,9 @@ impl LocalLlm {
         }
 
         let session = ort::session::Session::builder()
-            .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to create session builder: {}", e)))?
+            .map_err(|e| {
+                AleError::Other(anyhow::anyhow!("Failed to create session builder: {}", e))
+            })?
             .commit_from_file(model_path)
             .map_err(|e| AleError::Other(anyhow::anyhow!("Failed to load ONNX model: {}", e)))?;
 
@@ -125,7 +127,10 @@ impl LocalLlm {
         let scaled: Vec<f32> = logits.iter().map(|&l| l / temperature).collect();
         let max_val = scaled.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let exp_sum: f32 = scaled.iter().map(|&v| (v - max_val).exp()).sum();
-        let mut probs: Vec<f32> = scaled.iter().map(|&v| (v - max_val).exp() / exp_sum).collect();
+        let mut probs: Vec<f32> = scaled
+            .iter()
+            .map(|&v| (v - max_val).exp() / exp_sum)
+            .collect();
 
         if top_p < 1.0 {
             let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
@@ -184,7 +189,10 @@ fn pseudo_random() -> f32 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
-    std::time::Instant::now().elapsed().as_nanos().hash(&mut hasher);
+    std::time::Instant::now()
+        .elapsed()
+        .as_nanos()
+        .hash(&mut hasher);
     (hasher.finish() % 10000) as f32 / 10000.0
 }
 
@@ -249,7 +257,10 @@ impl LanguageModel for LocalLlm {
             generated += 1;
         }
 
-        let output_ids: Vec<usize> = token_ids[prompt_len..].iter().map(|&id| id as usize).collect();
+        let output_ids: Vec<usize> = token_ids[prompt_len..]
+            .iter()
+            .map(|&id| id as usize)
+            .collect();
         let text = ids_to_text(&output_ids);
 
         Ok(LlmResponse {

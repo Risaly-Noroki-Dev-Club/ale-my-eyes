@@ -173,17 +173,20 @@ fn init_ios_camera(
 
         // 创建 AVCaptureDeviceInput
         let mut error: *mut AnyObject = std::ptr::null_mut();
-        let input: *mut AnyObject =
-            msg_send![class!(AVCaptureDeviceInput), deviceInputWithDevice: device error: &mut error];
+        let input: *mut AnyObject = msg_send![class!(AVCaptureDeviceInput), deviceInputWithDevice: device error: &mut error];
 
         if input.is_null() || !error.is_null() {
-            return Err(AleError::Other(anyhow::anyhow!("Failed to create camera input")));
+            return Err(AleError::Other(anyhow::anyhow!(
+                "Failed to create camera input"
+            )));
         }
 
         // 创建 AVCaptureSession
         let session: *mut AnyObject = msg_send![class!(AVCaptureSession), new];
         if session.is_null() {
-            return Err(AleError::Other(anyhow::anyhow!("Failed to create capture session")));
+            return Err(AleError::Other(anyhow::anyhow!(
+                "Failed to create capture session"
+            )));
         }
 
         // 添加输入
@@ -196,8 +199,7 @@ fn init_ios_camera(
         let output: *mut AnyObject = msg_send![class!(AVCaptureVideoDataOutput), new];
 
         // 设置像素格式为 BGRA (kCVPixelFormatType_32BGRA)
-        let pixel_format_key: *mut AnyObject =
-            msg_send![class!(NSString), stringWithUTF8String: "kCVPixelBufferPixelFormatTypeKey\0".as_ptr()];
+        let pixel_format_key: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: "kCVPixelBufferPixelFormatTypeKey\0".as_ptr()];
         let pixel_format_value: u32 = 0x42475241; // BGRA
         let format_number: *mut AnyObject =
             msg_send![class!(NSNumber), numberWithUnsignedInt: pixel_format_value];
@@ -226,11 +228,7 @@ fn init_ios_camera(
         // 启动会话
         let _: () = msg_send![session, startRunning];
 
-        tracing::info!(
-            "iOS camera started (requested {}x{})",
-            width,
-            height
-        );
+        tracing::info!("iOS camera started (requested {}x{})", width, height);
 
         // 轮询获取帧（简化实现，生产环境应使用 AVCaptureVideoDataOutputSampleBufferDelegate）
         while {

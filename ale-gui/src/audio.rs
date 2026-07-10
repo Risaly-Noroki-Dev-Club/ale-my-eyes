@@ -1,6 +1,8 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 
+const MAX_BUFFERED_SAMPLES: usize = 2_880_000; // 60 seconds at 48 kHz mono
+
 #[cfg(target_os = "android")]
 use oboe::{AudioInputCallback, AudioInputStreamSafe, AudioStream, DataCallbackResult, Mono};
 
@@ -172,6 +174,7 @@ impl AudioInputCallback for RecorderCallback {
     ) -> DataCallbackResult {
         if let Ok(mut buffer) = self.samples.lock() {
             buffer.extend_from_slice(frames);
+            trim_buffer(&mut buffer);
         }
         DataCallbackResult::Continue
     }
@@ -195,6 +198,7 @@ where
             move |data: &[T], _| {
                 if let Ok(mut buffer) = samples.lock() {
                     buffer.extend(data.iter().copied().map(f32::from_sample));
+                    trim_buffer(&mut buffer);
                 }
             },
             move |error| {
@@ -203,6 +207,13 @@ where
             None,
         )
         .map_err(|error| format!("创建录音流失败: {error}"))
+}
+
+fn trim_buffer(buffer: &mut Vec<f32>) {
+    if buffer.len() > MAX_BUFFERED_SAMPLES {
+        let excess = buffer.len() - MAX_BUFFERED_SAMPLES;
+        buffer.drain(..excess);
+    }
 }
 
 trait FromSample<T> {

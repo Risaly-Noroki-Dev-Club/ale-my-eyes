@@ -1,4 +1,4 @@
-use super::ExecutionResult;
+use super::{ExecutionResult, PlatformCapabilities};
 use ale_core::actions::ActionPlan;
 use ale_core::{AleError, Result};
 
@@ -16,7 +16,7 @@ impl super::PlatformService for AndroidPlatform {
         None
     }
 
-    fn execute_plan(&self, _plan: &ActionPlan) -> Result<ExecutionResult> {
+    fn execute_plan(&self, _plan: &ActionPlan, _approved: bool) -> Result<ExecutionResult> {
         Err(AleError::Other(anyhow::anyhow!(
             "Android 客户端只负责接收指令，请连接桌面端执行"
         )))
@@ -24,5 +24,13 @@ impl super::PlatformService for AndroidPlatform {
 
     fn is_automation_ready(&self) -> bool {
         false
+    }
+
+    fn capabilities(&self) -> PlatformCapabilities {
+        PlatformCapabilities {
+            image_capture: false,
+            automation: false,
+            local_microphone: true,
+        }
     }
 }

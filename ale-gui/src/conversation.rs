@@ -1,4 +1,4 @@
-use crate::{tts_player, AppState, AppWindow};
+use crate::{audit, tts_player, AppState, AppWindow};
 use ale_core::actions::parse_action_plan_arguments;
 use ale_core::cloud::ToolCall;
 use ale_core::AleEngine;
@@ -130,26 +130,22 @@ async fn record_interaction(
 }
 
 async fn apply_tool_calls(state: &Arc<Mutex<AppState>>, app: &AppWindow, calls: &[ToolCall]) {
-    let mut descriptions = Vec::new();
-    let mut pending_plan = None;
-
-    for call in calls {
-        match parse_action_plan_arguments(&call.function.arguments) {
-            Ok(plan) => {
-                descriptions.extend(plan.describe_steps());
-                pending_plan = Some(plan);
-            }
-            Err(_) => descriptions.push(format!(
-                "{}: {}",
-                call.function.name, call.function.arguments
-            )),
-        }
+    let executable = calls
+        .iter()
+        .filter(|call| call.function.name == "execute_action_plan")
+        .collect::<Vec<_>>();
+    if executable.len() != 1 {
+        state.lock().await.pending_plan = None;
+        app.set_action_steps("模型返回了无效的自动化计划".into());
+        app.set_confirmation_text("".into());
+        app.set_show_confirmation(false);
+        return;
     }
 
-    app.set_action_steps(descriptions.join("\n").into());
-
-    if let Some(plan) = pending_plan {
+    if let Ok(plan) = parse_action_plan_arguments(&executable[0].function.arguments) {
+        app.set_action_steps(plan.describe_steps().join("\n").into());
         let confirmation_text = plan.speak_text();
+        audit::record("created", "local", &plan, None);
         state.lock().await.pending_plan = Some(plan);
         app.set_confirmation_text(confirmation_text.into());
         app.set_show_confirmation(true);

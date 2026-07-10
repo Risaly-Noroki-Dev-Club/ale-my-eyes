@@ -12,11 +12,14 @@ export component CompactScreen inherits Rectangle {
     in property <string> confirmation-text: "";
     in property <bool> is-busy: false;
     in property <bool> engine-ready: false;
+    in property <bool> listening-enabled: true;
+    in property <string> capability-text: "";
     in property <int> session-tokens: 0;
     in property <int> max-tokens-budget: 4000;
     in-out property <string> text-input: "";
 
     callback text-submitted(string);
+    callback toggle-listening();
     callback confirm-action();
     callback cancel-action();
     callback open-settings();
@@ -44,11 +47,25 @@ export component CompactScreen inherits Rectangle {
                     text: root.vad-state == "speaking" ? "说话中"
                         : root.vad-state == "speech_ended" ? "处理中"
                         : root.is-busy ? root.status-text
-                        : root.engine-ready ? "监听中" : root.status-text;
+                        : root.status-text;
                     font-size: AppTheme.base-font - 2px;
                     color: Palette.foreground.transparentize(0.3);
                     vertical-alignment: center;
                 }
+            }
+
+            Rectangle {
+                width: AppTheme.touch-min;
+                height: AppTheme.touch-min;
+                border-radius: 8px;
+                background: listening-touch.has-hover ? Palette.control-background : transparent;
+                Text {
+                    text: root.listening-enabled ? "||" : ">";
+                    font-size: AppTheme.base-font - 2px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                listening-touch := TouchArea { clicked => { root.toggle-listening(); } }
             }
 
             // 设置按钮 — 触控友好尺寸
@@ -103,7 +120,7 @@ export component CompactScreen inherits Rectangle {
                 padding: 12px;
 
                 if root.ai-response == "" && root.action-steps == "" : Text {
-                    text: "等待语音指令...";
+                    text: root.listening-enabled ? "等待语音指令..." : "监听已暂停";
                     font-size: AppTheme.base-font - 2px;
                     color: Palette.foreground.transparentize(0.5);
                     horizontal-alignment: center;
@@ -173,7 +190,7 @@ export component CompactScreen inherits Rectangle {
             height: AppTheme.touch-min;
 
             Text {
-                text: "Token:" + root.session-tokens + "/" + root.max-tokens-budget;
+                text: root.capability-text + "  LLM Token:" + root.session-tokens;
                 font-size: AppTheme.base-font - 4px;
                 color: Palette.foreground.transparentize(0.5);
                 vertical-alignment: center;
@@ -217,7 +234,7 @@ export component CompactScreen inherits Rectangle {
 
                 TouchArea {
                     clicked => {
-                        if (root.engine-ready) {
+                        if (root.engine-ready && !root.is-busy) {
                             root.text-submitted(root.text-input);
                         }
                     }

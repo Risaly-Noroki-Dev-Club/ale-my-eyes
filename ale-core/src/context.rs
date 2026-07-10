@@ -350,8 +350,8 @@ impl ContextManager {
                             _ => "系统",
                         },
                         // 截断过长的内容
-                        if entry.content.len() > 100 {
-                            format!("{}...", &entry.content[..100])
+                        if entry.content.chars().count() > 100 {
+                            format!("{}...", entry.content.chars().take(100).collect::<String>())
                         } else {
                             entry.content
                         }
@@ -367,8 +367,18 @@ impl ContextManager {
         };
 
         // 进一步压缩：如果摘要也太长，只保留最后部分
-        self.conversation_summary = Some(if new_summary.len() > 1500 {
-            format!("...{}", &new_summary[new_summary.len() - 1500..])
+        self.conversation_summary = Some(if new_summary.chars().count() > 1500 {
+            format!(
+                "...{}",
+                new_summary
+                    .chars()
+                    .rev()
+                    .take(1500)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<String>()
+            )
         } else {
             new_summary
         });
@@ -489,6 +499,15 @@ mod tests {
         // 应该触发压缩
         assert!(ctx.conversation_summary.is_some());
         assert!(ctx.conversation_turns() < 40);
+    }
+
+    #[test]
+    fn test_compact_handles_multibyte_text() {
+        let mut ctx = ContextManager::new(10);
+        for _ in 0..10 {
+            ctx.add_user_message("这是用于验证摘要截断不会破坏 UTF-8 边界的中文消息。".repeat(10));
+        }
+        assert!(ctx.conversation_summary.is_some());
     }
 
     #[test]

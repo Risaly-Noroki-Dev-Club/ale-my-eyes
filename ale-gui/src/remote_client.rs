@@ -6,8 +6,8 @@ use ale_core::remote::{
     RemoteError, RemoteMessage, REMOTE_PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::Message;
 use std::time::Duration;
+use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Clone)]
 pub struct RemoteClient {
@@ -43,12 +43,19 @@ impl RemoteClient {
         }
     }
 
-    pub async fn confirm(&self, request_id: String, approved: bool) -> Result<ExecutionStatus, String> {
+    pub async fn confirm(
+        &self,
+        request_id: String,
+        approved: bool,
+    ) -> Result<ExecutionStatus, String> {
         let (mut socket, mut secure) = self.connect().await?.0;
         send_secure(
             &mut socket,
             &mut secure,
-            &RemoteMessage::ConfirmExecution(ConfirmExecution { request_id, approved }),
+            &RemoteMessage::ConfirmExecution(ConfirmExecution {
+                request_id,
+                approved,
+            }),
         )
         .await?;
 
@@ -66,7 +73,9 @@ impl RemoteClient {
     ) -> Result<
         (
             (
-                tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
                 remote_crypto::SecureChannel,
             ),
             String,

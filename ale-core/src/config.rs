@@ -1,12 +1,15 @@
+use crate::secret_store::{SecretStore, SystemSecretStore};
 use crate::{AleError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// 云端API配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CloudApiConfig {
     pub provider: String,
+    #[serde(skip_serializing, default)]
     pub api_key: String,
     pub api_url: String,
     pub model: String,
@@ -166,13 +169,19 @@ pub struct AppConfig {
 pub struct ConfigManager {
     config_path: PathBuf,
     config: AppConfig,
+    secret_store: Arc<dyn SecretStore>,
 }
 
 impl ConfigManager {
     pub fn new(config_path: &Path) -> Self {
+        Self::with_secret_store(config_path, Arc::new(SystemSecretStore))
+    }
+
+    pub fn with_secret_store(config_path: &Path, secret_store: Arc<dyn SecretStore>) -> Self {
         Self {
             config_path: config_path.to_path_buf(),
             config: AppConfig::default(),
+            secret_store,
         }
     }
 
@@ -186,6 +195,13 @@ impl ConfigManager {
 
         let content = std::fs::read_to_string(&self.config_path)?;
         self.config = serde_json::from_str(&content)?;
+        if self.config.cloud_api.api_key.trim().is_empty() {
+            self.config.cloud_api.api_key = self.secret_store.get_api_key()?.unwrap_or_default();
+        } else {
+            // Migrate legacy plaintext keys before rewriting the configuration.
+            self.secret_store
+                .set_api_key(&self.config.cloud_api.api_key)?;
+        }
         self.save()?;
         Ok(())
     }
@@ -208,8 +224,14 @@ impl ConfigManager {
     }
 
     /// 更新配置
-    pub fn update_config(&mut self, config: AppConfig) {
+    pub fn update_config(&mut self, config: AppConfig) -> Result<()> {
+        if config.cloud_api.api_key.trim().is_empty() {
+            self.secret_store.delete_api_key()?;
+        } else {
+            self.secret_store.set_api_key(&config.cloud_api.api_key)?;
+        }
         self.config = config;
+        self.save()
     }
 
     /// 更新云端API配置
@@ -494,6 +516,26 @@ impl ConfigValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct TestSecretStore(Mutex<Option<String>>);
+
+    impl SecretStore for TestSecretStore {
+        fn get_api_key(&self) -> Result<Option<String>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn set_api_key(&self, api_key: &str) -> Result<()> {
+            *self.0.lock().unwrap() = Some(api_key.to_string());
+            Ok(())
+        }
+
+        fn delete_api_key(&self) -> Result<()> {
+            *self.0.lock().unwrap() = None;
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_default_config() {
@@ -624,12 +666,18 @@ mod tests {
         )
         .unwrap();
 
-        let mut manager = ConfigManager::new(&path);
+        let secret_store = Arc::new(TestSecretStore::default());
+        let mut manager = ConfigManager::with_secret_store(&path, secret_store.clone());
         manager.load().unwrap();
 
         assert!(manager.config().ui.auto_speak);
+        assert_eq!(
+            secret_store.get_api_key().unwrap().as_deref(),
+            Some("sk-test")
+        );
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.contains("auto_speak"));
+        assert!(!saved.contains("sk-test"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

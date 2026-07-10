@@ -1,4 +1,9 @@
+use crate::{AleError, Result};
 use serde::{Deserialize, Serialize};
+
+const MAX_ACTIONS: usize = 20;
+const MAX_TYPED_TEXT_CHARS: usize = 2_000;
+const MAX_WAIT_MS: u64 = 30_000;
 
 /// 操作风险等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -119,7 +124,7 @@ impl Action {
                 }
             }
             Action::Type { text } => {
-                format!("输入文字：{}", text)
+                format!("输入文字（{} 个字符）", text.chars().count())
             }
             Action::Key { key, modifiers } => {
                 if modifiers.is_empty() {
@@ -173,7 +178,7 @@ impl ActionPlan {
         if risk > self.risk_level {
             self.risk_level = risk;
         }
-        self.requires_confirmation = self.risk_level >= RiskLevel::High;
+        self.requires_confirmation = self.risk_level >= RiskLevel::Medium;
         self.actions.push(action);
     }
 
@@ -185,7 +190,50 @@ impl ActionPlan {
             .map(Action::risk_level)
             .max()
             .unwrap_or(RiskLevel::Low);
-        self.requires_confirmation = self.risk_level >= RiskLevel::High;
+        self.requires_confirmation = self.risk_level >= RiskLevel::Medium;
+    }
+
+    /// Validate untrusted model output before it is presented or executed.
+    pub fn validate(&self) -> Result<()> {
+        if self.actions.is_empty() {
+            return Err(AleError::ConfigError("自动化计划不能为空".to_string()));
+        }
+        if self.actions.len() > MAX_ACTIONS {
+            return Err(AleError::ConfigError(format!(
+                "自动化计划最多允许 {MAX_ACTIONS} 步"
+            )));
+        }
+        for action in &self.actions {
+            match action {
+                Action::Click { x, y, .. }
+                | Action::DoubleClick { x, y }
+                | Action::MouseMove { x, y }
+                | Action::Scroll { x, y, .. }
+                    if !x.is_finite() || !y.is_finite() || *x < 0.0 || *y < 0.0 =>
+                {
+                    return Err(AleError::ConfigError(
+                        "自动化坐标必须是非负有限数".to_string(),
+                    ));
+                }
+                Action::Scroll {
+                    delta_x, delta_y, ..
+                } if !delta_x.is_finite() || !delta_y.is_finite() => {
+                    return Err(AleError::ConfigError("滚动距离必须是有限数".to_string()));
+                }
+                Action::Type { text } if text.chars().count() > MAX_TYPED_TEXT_CHARS => {
+                    return Err(AleError::ConfigError(format!(
+                        "单次输入最多允许 {MAX_TYPED_TEXT_CHARS} 个字符"
+                    )));
+                }
+                Action::Wait { ms } if *ms > MAX_WAIT_MS => {
+                    return Err(AleError::ConfigError(format!(
+                        "单次等待最多允许 {MAX_WAIT_MS} 毫秒"
+                    )));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// 获取所有操作的描述列表
@@ -210,20 +258,26 @@ impl ActionPlan {
 }
 
 /// 从 AI 响应 JSON 解析操作计划
-pub fn parse_action_plan(json: &str) -> Result<ActionPlan, serde_json::Error> {
+pub fn parse_action_plan(json: &str) -> std::result::Result<ActionPlan, serde_json::Error> {
     let mut plan: ActionPlan = serde_json::from_str(json)?;
     plan.recompute_risk();
+    plan.validate()
+        .map_err(|error| serde_json::Error::io(std::io::Error::other(error.to_string())))?;
     Ok(plan)
 }
 
 /// 从 OpenAI-compatible function call arguments 解析操作计划。
 ///
 /// 兼容两种常见形态：完整 ActionPlan，或 `{ "plan": ActionPlan }` 包装对象。
-pub fn parse_action_plan_arguments(json: &str) -> Result<ActionPlan, serde_json::Error> {
+pub fn parse_action_plan_arguments(
+    json: &str,
+) -> std::result::Result<ActionPlan, serde_json::Error> {
     parse_action_plan(json).or_else(|_| {
         let value: serde_json::Value = serde_json::from_str(json)?;
         let mut plan: ActionPlan = serde_json::from_value(value["plan"].clone())?;
         plan.recompute_risk();
+        plan.validate()
+            .map_err(|error| serde_json::Error::io(std::io::Error::other(error.to_string())))?;
         Ok(plan)
     })
 }
@@ -264,6 +318,14 @@ mod tests {
         assert_eq!(plan.risk_level, RiskLevel::Low);
         assert!(!plan.requires_confirmation);
 
+        plan.add_action(Action::Click {
+            x: 0.0,
+            y: 0.0,
+            button: MouseButton::Left,
+        });
+        assert_eq!(plan.risk_level, RiskLevel::Medium);
+        assert!(plan.requires_confirmation);
+
         plan.add_action(Action::FileOperation {
             operation: FileOp::Delete,
             path: "/tmp/test".to_string(),
@@ -286,7 +348,8 @@ mod tests {
         let type_action = Action::Type {
             text: "hello".to_string(),
         };
-        assert!(type_action.describe().contains("hello"));
+        assert!(type_action.describe().contains("5"));
+        assert!(!type_action.describe().contains("hello"));
     }
 
     #[test]
@@ -331,7 +394,7 @@ mod tests {
         let plan = parse_action_plan_arguments(json).unwrap();
         assert_eq!(plan.actions.len(), 1);
         assert_eq!(plan.risk_level, RiskLevel::Medium);
-        assert!(!plan.requires_confirmation);
+        assert!(plan.requires_confirmation);
     }
 
     #[test]
@@ -348,6 +411,22 @@ mod tests {
         let plan = parse_action_plan_arguments(json).unwrap();
         assert_eq!(plan.risk_level, RiskLevel::High);
         assert!(plan.requires_confirmation);
+    }
+
+    #[test]
+    fn test_plan_validation_rejects_unsafe_limits() {
+        let mut plan = ActionPlan::new("test".to_string());
+        plan.actions = vec![Action::Type {
+            text: "x".repeat(MAX_TYPED_TEXT_CHARS + 1),
+        }];
+        assert!(plan.validate().is_err());
+
+        plan.actions = vec![Action::Click {
+            x: f64::NAN,
+            y: 0.0,
+            button: MouseButton::Left,
+        }];
+        assert!(plan.validate().is_err());
     }
 
     #[test]

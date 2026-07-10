@@ -1,4 +1,4 @@
-use ale_core::actions::{ActionPlan, Action, MouseButton};
+use ale_core::actions::{Action, ActionPlan, MouseButton};
 use ale_core::{AleError, Result};
 
 /// iOS 自动化引擎配置
@@ -40,8 +40,9 @@ impl IosAutomationEngine {
     }
 
     /// 执行操作计划 — iOS 仅支持有限的操作
-    pub fn execute_plan(&self, plan: &ActionPlan) -> Result<ExecutionResult> {
-        if plan.requires_confirmation && self.config.require_confirmation {
+    pub fn execute_plan(&self, plan: &ActionPlan, approved: bool) -> Result<ExecutionResult> {
+        plan.validate()?;
+        if plan.requires_confirmation && !approved {
             return Err(AleError::Other(anyhow::anyhow!(
                 "操作需要用户确认: {}",
                 plan.explanation
@@ -100,8 +101,7 @@ impl IosAutomationEngine {
         use objc2::{class, msg_send};
 
         unsafe {
-            let ns_url_str: *mut AnyObject =
-                msg_send![class!(NSString), stringWithUTF8String: std::ffi::CString::new(url).unwrap().as_ptr()];
+            let ns_url_str: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: std::ffi::CString::new(url).unwrap().as_ptr()];
             let ns_url: *mut AnyObject = msg_send![class!(NSURL), URLWithString: ns_url_str];
 
             if ns_url.is_null() {

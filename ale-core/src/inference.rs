@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "local-inference")]
 use crate::asr::SpeechRecognizer;
+#[cfg(feature = "local-inference")]
+use crate::vlm::VisionModel;
+#[cfg(feature = "local-inference")]
+use std::sync::Arc;
 
 /// 设备性能等级
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -89,6 +93,8 @@ pub struct AdaptiveInference {
     cloud_api: Option<Box<dyn crate::cloud::CloudApi>>,
     #[cfg(feature = "local-inference")]
     local_asr: Option<crate::asr::WhisperRecognizer>,
+    #[cfg(feature = "local-inference")]
+    local_vlm: Option<Arc<dyn VisionModel>>,
 }
 
 impl AdaptiveInference {
@@ -98,6 +104,8 @@ impl AdaptiveInference {
             cloud_api: None,
             #[cfg(feature = "local-inference")]
             local_asr: None,
+            #[cfg(feature = "local-inference")]
+            local_vlm: None,
         }
     }
 
@@ -112,13 +120,72 @@ impl AdaptiveInference {
         self.local_asr = Some(recognizer);
     }
 
+    /// Sets an explicitly loaded local image-description model.
+    #[cfg(feature = "local-inference")]
+    pub fn set_local_vlm(&mut self, model: Arc<dyn VisionModel>) {
+        self.local_vlm = Some(model);
+    }
+
+    #[cfg(feature = "local-inference")]
+    pub fn local_vlm_available(&self) -> bool {
+        self.local_vlm.is_some()
+    }
+
     /// 检测设备性能
     pub async fn detect_device_performance() -> DevicePerformance {
-        // 这里可以添加实际的设备性能检测逻辑
-        // 例如：检查CPU核心数、内存大小、GPU可用性等
+        // 检测 CPU 核心数
+        let cpu_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2);
 
-        // 简化实现：返回默认值
-        DevicePerformance::Medium
+        // 检测内存大小（macOS/Linux）
+        let total_memory_gb = Self::detect_memory_gb();
+
+        // 检测是否为 Apple Silicon (M1/M2/M3)
+        let is_apple_silicon = cfg!(target_os = "macos") && cfg!(target_arch = "aarch64");
+
+        // 保守策略：只有明确是强设备才升级，否则默认 Low
+        // 这样确保在未知设备上使用 whisper-tiny（75MB，最快）
+        if is_apple_silicon && total_memory_gb >= 16.0 {
+            DevicePerformance::High
+        } else if cpu_cores >= 4 && total_memory_gb >= 8.0 {
+            DevicePerformance::Medium
+        } else {
+            DevicePerformance::Low
+        }
+    }
+
+    /// 检测系统内存大小 (GB)
+    fn detect_memory_gb() -> f64 {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(output) = std::process::Command::new("sysctl")
+                .args(["-n", "hw.memsize"])
+                .output()
+            {
+                if let Ok(s) = String::from_utf8(output.stdout) {
+                    if let Ok(bytes) = s.trim().parse::<u64>() {
+                        return bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                    }
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+                for line in content.lines() {
+                    if line.starts_with("MemTotal:") {
+                        if let Some(kb_str) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = kb_str.parse::<u64>() {
+                                return kb as f64 / (1024.0 * 1024.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 无法检测时保守估计为 4GB
+        4.0
     }
 
     /// 检测网络状态
@@ -227,9 +294,28 @@ impl AdaptiveInference {
         let mode = self.select_inference_mode(TaskComplexity::Complex);
 
         match mode {
-            InferenceMode::LocalOnly => Err(AleError::Other(anyhow::anyhow!(
-                "Local inference not available"
-            ))),
+            InferenceMode::LocalOnly => {
+                #[cfg(feature = "local-inference")]
+                {
+                    let model = self
+                        .local_vlm
+                        .as_ref()
+                        .ok_or_else(|| AleError::NotInitialized("Local image-description model"))?;
+                    let description = model.describe_image(image_data).await?;
+                    Ok(InferenceResult {
+                        data: description,
+                        mode_used: InferenceMode::LocalOnly,
+                        latency: start_time.elapsed(),
+                        tokens_used: None,
+                    })
+                }
+                #[cfg(not(feature = "local-inference"))]
+                {
+                    Err(AleError::Other(anyhow::anyhow!(
+                        "Local inference not available (feature not enabled)"
+                    )))
+                }
+            }
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
                 let cloud_api = self
                     .cloud_api
@@ -259,7 +345,7 @@ impl AdaptiveInference {
 
         match mode {
             InferenceMode::LocalOnly => Err(AleError::Other(anyhow::anyhow!(
-                "Local inference not available"
+                "本地视觉模型仅支持图像描述；问答和自动化计划需要云端模型"
             ))),
             InferenceMode::CloudOnly | InferenceMode::Adaptive => {
                 let cloud_api = self

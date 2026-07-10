@@ -47,8 +47,9 @@ impl AutomationEngine {
     }
 
     /// 执行操作计划
-    pub fn execute_plan(&mut self, plan: &ActionPlan) -> Result<ExecutionResult> {
-        if plan.requires_confirmation && self.config.require_confirmation {
+    pub fn execute_plan(&mut self, plan: &ActionPlan, approved: bool) -> Result<ExecutionResult> {
+        plan.validate()?;
+        if plan.requires_confirmation && !approved {
             return Err(AleError::Other(anyhow::anyhow!(
                 "操作需要用户确认: {}",
                 plan.explanation
@@ -347,7 +348,9 @@ fn execute_file_op(op: FileOp, path: &str, target: Option<&str>) -> Result<()> {
         }
         FileOp::Delete => {
             if path.is_dir() {
-                std::fs::remove_dir_all(&path)?;
+                return Err(AleError::Other(anyhow::anyhow!(
+                    "为避免递归删除，自动化不允许删除目录"
+                )));
             } else {
                 std::fs::remove_file(&path)?;
             }
@@ -407,7 +410,28 @@ fn safe_automation_path(path: &str) -> Result<PathBuf> {
         )));
     }
 
+    let canonical_home = home.canonicalize()?;
+    let existing_parent = nearest_existing_parent(&candidate)?.canonicalize()?;
+    if !existing_parent.starts_with(&canonical_home) {
+        return Err(AleError::Other(anyhow::anyhow!(
+            "自动化文件路径不能通过符号链接离开用户目录"
+        )));
+    }
+
     Ok(candidate)
+}
+
+fn nearest_existing_parent(path: &Path) -> Result<&Path> {
+    let mut parent = path.parent();
+    while let Some(candidate) = parent {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        parent = candidate.parent();
+    }
+    Err(AleError::Other(anyhow::anyhow!(
+        "Cannot find an existing parent directory for file operation"
+    )))
 }
 
 fn home_dir() -> Option<PathBuf> {

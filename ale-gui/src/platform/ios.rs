@@ -1,4 +1,4 @@
-use super::ExecutionResult;
+use super::{ExecutionResult, PlatformCapabilities};
 use crate::automation_ios::{AutomationConfig, IosAutomationEngine};
 use crate::camera_ios::{CameraConfig, IosCamera};
 use ale_core::actions::ActionPlan;
@@ -44,13 +44,13 @@ impl super::PlatformService for IosPlatform {
         self.camera.as_ref()?.latest_frame_jpeg(80)
     }
 
-    fn execute_plan(&self, plan: &ActionPlan) -> Result<ExecutionResult> {
+    fn execute_plan(&self, plan: &ActionPlan, approved: bool) -> Result<ExecutionResult> {
         let auto = self
             .automation
             .as_ref()
             .ok_or_else(|| AleError::Other(anyhow::anyhow!("iOS 自动化引擎不可用")))?;
 
-        let result = auto.execute_plan(plan)?;
+        let result = auto.execute_plan(plan, approved)?;
         Ok(ExecutionResult {
             actions_executed: result.actions_executed,
         })
@@ -58,5 +58,13 @@ impl super::PlatformService for IosPlatform {
 
     fn is_automation_ready(&self) -> bool {
         self.automation.is_some()
+    }
+
+    fn capabilities(&self) -> PlatformCapabilities {
+        PlatformCapabilities {
+            image_capture: self.camera.is_some(),
+            automation: self.automation.is_some(),
+            local_microphone: true,
+        }
     }
 }

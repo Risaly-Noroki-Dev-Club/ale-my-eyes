@@ -15,14 +15,12 @@ pub fn play_audio(audio_data: &[u8]) -> Result<(), String> {
     unsafe {
         // 创建 NSData 从文件
         let path_str = temp_file.to_str().unwrap_or("/tmp/ale_tts.mp3");
-        let ns_path: *mut AnyObject =
-            msg_send![class!(NSString), stringWithUTF8String: std::ffi::CString::new(path_str).unwrap().as_ptr()];
+        let ns_path: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: std::ffi::CString::new(path_str).unwrap().as_ptr()];
         let url: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: ns_path];
 
         // 创建 AVAudioPlayer
         let mut error: *mut AnyObject = std::ptr::null_mut();
-        let player: *mut AnyObject =
-            msg_send![class!(AVAudioPlayer), alloc];
+        let player: *mut AnyObject = msg_send![class!(AVAudioPlayer), alloc];
         let player: *mut AnyObject =
             msg_send![player, initWithContentsOfURL: url error: &mut error];
 

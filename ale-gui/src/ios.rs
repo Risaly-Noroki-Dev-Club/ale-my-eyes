@@ -56,10 +56,8 @@ fn configure_audio_session() {
         }
 
         // 设置为 PlayAndRecord 模式（同时支持录音和播放）
-        let mode_play_and_record: *mut AnyObject =
-            msg_send![class!(NSString), stringWithUTF8String: "AVAudioSessionModeDefault\0".as_ptr()];
-        let category_play_and_record: *mut AnyObject =
-            msg_send![class!(NSString), stringWithUTF8String: "AVAudioSessionCategoryPlayAndRecord\0".as_ptr()];
+        let mode_play_and_record: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: "AVAudioSessionModeDefault\0".as_ptr()];
+        let category_play_and_record: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: "AVAudioSessionCategoryPlayAndRecord\0".as_ptr()];
 
         let mut error: *mut AnyObject = std::ptr::null_mut();
         let _: bool = msg_send![

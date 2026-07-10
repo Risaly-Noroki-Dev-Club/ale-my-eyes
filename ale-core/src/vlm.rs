@@ -77,12 +77,9 @@ impl OnnxVlm {
 #[async_trait]
 impl VisionModel for OnnxVlm {
     async fn describe_image(&self, image_data: &[u8]) -> Result<String> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| {
-                AleError::VlmError("VLM model not loaded, call load_model() first".to_string())
-            })?;
+        let session = self.session.as_ref().ok_or_else(|| {
+            AleError::VlmError("VLM model not loaded, call load_model() first".to_string())
+        })?;
 
         let mut session = session
             .lock()

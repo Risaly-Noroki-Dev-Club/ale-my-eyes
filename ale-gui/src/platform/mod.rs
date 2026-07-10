@@ -6,6 +6,13 @@ pub struct ExecutionResult {
     pub actions_executed: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PlatformCapabilities {
+    pub image_capture: bool,
+    pub automation: bool,
+    pub local_microphone: bool,
+}
+
 /// 平台抽象 trait。
 /// Desktop 负责屏幕捕获和执行；Android 目前只作为局域网指令入口骨架。
 pub trait PlatformService: Send + Sync {
@@ -13,10 +20,12 @@ pub trait PlatformService: Send + Sync {
     fn capture_image(&self) -> Option<Vec<u8>>;
 
     /// 执行自动化操作计划
-    fn execute_plan(&self, plan: &ActionPlan) -> Result<ExecutionResult>;
+    fn execute_plan(&self, plan: &ActionPlan, approved: bool) -> Result<ExecutionResult>;
 
     /// 自动化引擎是否就绪
     fn is_automation_ready(&self) -> bool;
+
+    fn capabilities(&self) -> PlatformCapabilities;
 }
 
 /// 为当前编译目标创建平台服务实例

@@ -22,6 +22,8 @@ export component AppWindow inherits Window {
     in-out property <string> confirmation-text: "";
     in-out property <bool> is-busy: false;
     in-out property <bool> engine-ready: false;
+    in-out property <bool> listening-enabled: true;
+    in-out property <string> capability-text: "";
     in-out property <int> session-tokens: 0;
     in-out property <int> max-tokens-budget: 4000;
     in-out property <string> text-input: "";
@@ -44,6 +46,7 @@ export component AppWindow inherits Window {
     in-out property <bool> is-mobile: false;
 
     callback text-submitted(string);
+    callback toggle-listening();
     callback confirm-action();
     callback cancel-action();
     callback open-settings();
@@ -83,11 +86,14 @@ export component AppWindow inherits Window {
         confirmation-text: root.confirmation-text;
         is-busy: root.is-busy;
         engine-ready: root.engine-ready;
+        listening-enabled: root.listening-enabled;
+        capability-text: root.capability-text;
         session-tokens: root.session-tokens;
         max-tokens-budget: root.max-tokens-budget;
         text-input: root.text-input;
 
         text-submitted(text) => { root.text-submitted(text); }
+        toggle-listening => { root.toggle-listening(); }
         confirm-action => { root.confirm-action(); }
         cancel-action => { root.cancel-action(); }
         open-settings => { root.open-settings(); }

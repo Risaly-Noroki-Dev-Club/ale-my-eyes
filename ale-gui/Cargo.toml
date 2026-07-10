@@ -19,6 +19,7 @@ base64 = "0.22"
 futures-util = "0.3"
 rand = "0.8"
 sha2 = "0.10"
+dirs = "5"
 snow = "0.9"
 tokio-tungstenite = "0.24"
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -42,6 +43,7 @@ slint = { version = "1.16", features = ["backend-android-activity-06"] }
 oboe = "0.6"
 jni = "0.21"
 ndk-context = "0.1"
+mdns-sd = "0.11"
 
 # iOS-only dependencies
 [target.'cfg(target_os = "ios")'.dependencies]

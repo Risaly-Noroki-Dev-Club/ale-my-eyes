@@ -1,3 +1,4 @@
+use crate::audit;
 use crate::conversation::automation_tools;
 use crate::platform::{self, PlatformService};
 use crate::remote_crypto;
@@ -59,7 +60,10 @@ pub async fn start(engine: Arc<Mutex<AleEngine>>) -> Result<RemoteServerHandle, 
                     let pairing = server_pairing.clone();
                     let platform = platform.clone();
                     tokio::spawn(async move {
-                        if let Err(error) = handle_connection(stream, addr, engine, pending, pairing, platform).await {
+                        if let Err(error) =
+                            handle_connection(stream, addr, engine, pending, pairing, platform)
+                                .await
+                        {
                             tracing::warn!("Remote client disconnected: {}", error);
                         }
                     });
@@ -118,12 +122,25 @@ async fn handle_connection(
             RemoteMessage::ClientHello(ClientHello { .. }) => {}
             RemoteMessage::CommandRequest(request) => {
                 let request_id = request.request_id.clone();
-                match handle_command(engine.clone(), platform.clone(), &request.request_id, &request.input).await {
+                match handle_command(
+                    engine.clone(),
+                    platform.clone(),
+                    &request.request_id,
+                    &request.input,
+                )
+                .await
+                {
                     Ok((preview, plan)) => {
                         if let Some(plan) = plan {
+                            audit::record("created", "remote", &plan, None);
                             pending.lock().await.insert(request_id.clone(), plan);
                         }
-                        send_secure(&mut socket, &mut secure, &RemoteMessage::CommandPreview(preview)).await?;
+                        send_secure(
+                            &mut socket,
+                            &mut secure,
+                            &RemoteMessage::CommandPreview(preview),
+                        )
+                        .await?;
                     }
                     Err(error) => {
                         send_secure(
@@ -140,7 +157,12 @@ async fn handle_connection(
             }
             RemoteMessage::ConfirmExecution(confirm) => {
                 let status = handle_confirm(confirm, pending.clone(), platform.clone()).await;
-                send_secure(&mut socket, &mut secure, &RemoteMessage::ExecutionStatus(status)).await?;
+                send_secure(
+                    &mut socket,
+                    &mut secure,
+                    &RemoteMessage::ExecutionStatus(status),
+                )
+                .await?;
             }
             _ => {}
         }
@@ -163,7 +185,10 @@ async fn handle_command(
                 .decode(wav_base64)
                 .map_err(|error| error.to_string())?;
             let engine = engine.lock().await;
-            engine.transcribe(&audio).await.map_err(|error| error.to_string())?
+            engine
+                .transcribe(&audio)
+                .await
+                .map_err(|error| error.to_string())?
         }
     };
 
@@ -176,7 +201,10 @@ async fn handle_command(
             .map_err(|error| error.to_string())?
     } else {
         let engine = engine.lock().await;
-        let response = engine.ask_text(&question).await.map_err(|error| error.to_string())?;
+        let response = engine
+            .ask_text(&question)
+            .await
+            .map_err(|error| error.to_string())?;
         return Ok((
             CommandPreview {
                 request_id,
@@ -193,15 +221,22 @@ async fn handle_command(
     let mut action_steps = Vec::new();
     let mut plan = None;
     if let Some(calls) = response.tool_calls {
-        for call in calls {
-            if let Ok(parsed) = parse_action_plan_arguments(&call.function.arguments) {
-                action_steps.extend(parsed.describe_steps());
+        let executable = calls
+            .iter()
+            .filter(|call| call.function.name == "execute_action_plan")
+            .collect::<Vec<_>>();
+        if executable.len() == 1 {
+            if let Ok(parsed) = parse_action_plan_arguments(&executable[0].function.arguments) {
+                action_steps = parsed.describe_steps();
                 plan = Some(parsed);
             }
         }
     }
 
-    let confirmation_text = plan.as_ref().map(ActionPlan::speak_text).unwrap_or_default();
+    let confirmation_text = plan
+        .as_ref()
+        .map(ActionPlan::speak_text)
+        .unwrap_or_default();
     let requires_confirmation = plan
         .as_ref()
         .map(|plan| plan.requires_confirmation)
@@ -227,7 +262,9 @@ async fn handle_confirm(
     platform: Arc<dyn PlatformService>,
 ) -> ExecutionStatus {
     if !confirm.approved {
-        pending.lock().await.remove(&confirm.request_id);
+        if let Some(plan) = pending.lock().await.remove(&confirm.request_id) {
+            audit::record("cancelled", "remote", &plan, None);
+        }
         return ExecutionStatus {
             request_id: confirm.request_id,
             state: ExecutionState::Cancelled,
@@ -245,19 +282,26 @@ async fn handle_confirm(
         };
     };
 
-    match platform.execute_plan(&plan) {
-        Ok(result) => ExecutionStatus {
-            request_id: confirm.request_id,
-            state: ExecutionState::Completed,
-            message: format!("执行完成: {} 步", result.actions_executed),
-            actions_executed: result.actions_executed,
-        },
-        Err(error) => ExecutionStatus {
-            request_id: confirm.request_id,
-            state: ExecutionState::Failed,
-            message: error.to_string(),
-            actions_executed: 0,
-        },
+    audit::record("approved", "remote", &plan, None);
+    match platform.execute_plan(&plan, true) {
+        Ok(result) => {
+            audit::record("completed", "remote", &plan, None);
+            ExecutionStatus {
+                request_id: confirm.request_id,
+                state: ExecutionState::Completed,
+                message: format!("执行完成: {} 步", result.actions_executed),
+                actions_executed: result.actions_executed,
+            }
+        }
+        Err(error) => {
+            audit::record("failed", "remote", &plan, Some(&error.to_string()));
+            ExecutionStatus {
+                request_id: confirm.request_id,
+                state: ExecutionState::Failed,
+                message: error.to_string(),
+                actions_executed: 0,
+            }
+        }
     }
 }
 
@@ -278,7 +322,13 @@ fn local_addresses() -> Vec<String> {
         .map(|interfaces| {
             interfaces
                 .into_iter()
-                .filter_map(|(_, ip)| if ip.is_ipv4() && !ip.is_loopback() { Some(ip.to_string()) } else { None })
+                .filter_map(|(_, ip)| {
+                    if ip.is_ipv4() && !ip.is_loopback() {
+                        Some(ip.to_string())
+                    } else {
+                        None
+                    }
+                })
                 .collect()
         })
         .unwrap_or_default()

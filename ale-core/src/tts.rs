@@ -118,7 +118,8 @@ impl TextToSpeech for SystemTts {
                 // 尝试初始化以获取语音列表
                 if let Ok(engine) = tts::Tts::default() {
                     if let Ok(voices) = engine.voices() {
-                        let names: Vec<String> = voices.iter().map(|v| v.name().to_string()).collect();
+                        let names: Vec<String> =
+                            voices.iter().map(|v| v.name().to_string()).collect();
                         if !names.is_empty() {
                             *guard = Some(engine);
                             return names;
@@ -144,11 +145,7 @@ impl TextToSpeech for SystemTts {
     }
 
     fn model_info(&self) -> crate::ModelInfo {
-        let loaded = self
-            .tts_engine
-            .lock()
-            .map(|g| g.is_some())
-            .unwrap_or(false);
+        let loaded = self.tts_engine.lock().map(|g| g.is_some()).unwrap_or(false);
 
         crate::ModelInfo {
             name: "system-tts".to_string(),

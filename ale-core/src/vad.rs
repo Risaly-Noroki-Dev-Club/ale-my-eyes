@@ -29,11 +29,24 @@ pub struct VadConfig {
 impl Default for VadConfig {
     fn default() -> Self {
         Self {
-            energy_threshold: 0.02,
+            energy_threshold: 0.015,
             speech_start_frames: 3,
-            silence_end_frames: 15, // ~300ms at 20ms frames
+            silence_end_frames: 25, // ~500ms at 20ms frames — 给呼吸暂停留出空间
             sample_rate: 16000,
             frame_size: 320, // 20ms at 16kHz
+        }
+    }
+}
+
+impl VadConfig {
+    /// 创建针对弱语音优化的配置（呼吸衰竭/气短患者）
+    pub fn weak_voice() -> Self {
+        Self {
+            energy_threshold: 0.008,
+            speech_start_frames: 2,
+            silence_end_frames: 35, // ~700ms — 更长的呼吸暂停容忍
+            sample_rate: 16000,
+            frame_size: 320,
         }
     }
 }
@@ -232,13 +245,13 @@ mod tests {
         }
         assert_eq!(vad.state(), VadState::Speaking);
 
-        // 开始静默
-        for _ in 0..14 {
+        // 开始静默，前24帧仍然处于 Speaking
+        for _ in 0..24 {
             let state = vad.process_frame(&silence);
             assert_eq!(state, VadState::Speaking);
         }
 
-        // 第15帧静默 -> SpeechEnded
+        // 第25帧静默 -> SpeechEnded
         let state = vad.process_frame(&silence);
         assert_eq!(state, VadState::SpeechEnded);
 

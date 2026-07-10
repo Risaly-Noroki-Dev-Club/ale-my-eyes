@@ -1,4 +1,5 @@
 pub mod audio;
+mod audit;
 mod conversation;
 pub mod file_picker;
 pub mod tts_player;
@@ -59,6 +60,7 @@ pub struct AppState {
     vad: VoiceActivityDetector,
     vad_active: bool,
     vad_frame_count: u64,
+    listening_enabled: bool,
     platform: Option<Box<dyn PlatformService>>,
     pending_plan: Option<ActionPlan>,
     #[cfg(target_os = "android")]
@@ -84,6 +86,7 @@ impl AppState {
             vad: VoiceActivityDetector::with_default_config(),
             vad_active: false,
             vad_frame_count: 0,
+            listening_enabled: true,
             platform: None,
             pending_plan: None,
             #[cfg(target_os = "android")]
@@ -173,6 +176,28 @@ pub fn setup_app(app: &AppWindow) {
 
                     // 创建平台服务。Android 目前只作为局域网指令入口骨架。
                     let platform = platform::create_platform();
+                    let capabilities = platform.capabilities();
+                    app.set_capability_text(
+                        format!(
+                            "{}{}{}",
+                            if capabilities.local_microphone {
+                                "麦克风 + "
+                            } else {
+                                ""
+                            },
+                            if capabilities.image_capture {
+                                "视觉"
+                            } else {
+                                "无本机视觉"
+                            },
+                            if capabilities.automation {
+                                " + 自动化"
+                            } else {
+                                ""
+                            }
+                        )
+                        .into(),
+                    );
                     st.platform = Some(platform);
 
                     // Auto-start continuous listening
@@ -290,51 +315,52 @@ pub fn setup_app(app: &AppWindow) {
                         app.set_is_busy(false);
                         let mut st = state.lock().await;
                         start_continuous_listening(&mut st, &app);
-                        return;
                     }
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        // Transcribe audio
+                        let transcription = {
+                            let eng = engine.lock().await;
+                            eng.transcribe(&audio).await
+                        };
 
-                    // Transcribe audio
-                    let transcription = {
-                        let eng = engine.lock().await;
-                        eng.transcribe(&audio).await
-                    };
-
-                    let Some(app) = app_weak.upgrade() else {
-                        return;
-                    };
-
-                    let question = match transcription {
-                        Ok(ref text) => {
-                            app.set_transcription(text.clone().into());
-                            text.clone()
-                        }
-                        Err(ref e) => {
-                            app.set_transcription(slint::format!("转写失败: {}", e));
-                            app.set_is_busy(false);
-                            app.set_status_text("就绪".into());
-                            app.set_status_type("ready".into());
-                            let mut st = state.lock().await;
-                            start_continuous_listening(&mut st, &app);
+                        let Some(app) = app_weak.upgrade() else {
                             return;
-                        }
-                    };
+                        };
 
-                    handle_question_response(
-                        &state,
-                        &app,
-                        &app_weak,
-                        engine.clone(),
-                        question,
-                        image_data,
-                        auto_speak,
-                    )
-                    .await;
+                        let question = match transcription {
+                            Ok(ref text) => {
+                                app.set_transcription(text.clone().into());
+                                text.clone()
+                            }
+                            Err(ref e) => {
+                                app.set_transcription(slint::format!("转写失败: {}", e));
+                                app.set_is_busy(false);
+                                app.set_status_text("就绪".into());
+                                app.set_status_type("ready".into());
+                                let mut st = state.lock().await;
+                                start_continuous_listening(&mut st, &app);
+                                return;
+                            }
+                        };
 
-                    app.set_is_busy(false);
+                        handle_question_response(
+                            &state,
+                            &app,
+                            &app_weak,
+                            engine.clone(),
+                            question,
+                            image_data,
+                            auto_speak,
+                        )
+                        .await;
 
-                    // Restart listening
-                    let mut st = state.lock().await;
-                    start_continuous_listening(&mut st, &app);
+                        app.set_is_busy(false);
+
+                        // Restart listening
+                        let mut st = state.lock().await;
+                        start_continuous_listening(&mut st, &app);
+                    }
                 });
             },
         );
@@ -346,7 +372,7 @@ pub fn setup_app(app: &AppWindow) {
         let app_weak = app_weak.clone();
         app.on_text_submitted(move |text| {
             let question: String = text.into();
-            if question.is_empty() {
+            if question.trim().is_empty() || question.chars().count() > 2_000 {
                 return;
             }
             let state = state.clone();
@@ -375,7 +401,8 @@ pub fn setup_app(app: &AppWindow) {
 
                 #[cfg(target_os = "android")]
                 {
-                    handle_remote_command(&state, &app, CommandInput::Text { text: question }).await;
+                    handle_remote_command(&state, &app, CommandInput::Text { text: question })
+                        .await;
                 }
                 #[cfg(not(target_os = "android"))]
                 {
@@ -417,13 +444,17 @@ pub fn setup_app(app: &AppWindow) {
                         (Some(client), Some(request_id)) => {
                             match client.confirm(request_id, true).await {
                                 Ok(status) => {
-                                    let Some(app) = app_weak.upgrade() else { return };
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
                                     app.set_show_confirmation(false);
                                     app.set_status_text(status.message.into());
                                     app.set_status_type("ready".into());
                                 }
                                 Err(error) => {
-                                    let Some(app) = app_weak.upgrade() else { return };
+                                    let Some(app) = app_weak.upgrade() else {
+                                        return;
+                                    };
                                     app.set_show_confirmation(false);
                                     app.set_status_text(slint::format!("远程执行失败: {}", error));
                                     app.set_status_type("error".into());
@@ -431,69 +462,117 @@ pub fn setup_app(app: &AppWindow) {
                             }
                         }
                         _ => {
-                            let Some(app) = app_weak.upgrade() else { return };
+                            let Some(app) = app_weak.upgrade() else {
+                                return;
+                            };
                             app.set_show_confirmation(false);
                             app.set_status_text("未连接桌面端或没有待确认请求".into());
                             app.set_status_type("error".into());
                         }
                     }
-                    return;
                 }
-
-                if let Some(plan) = st.pending_plan.take() {
-                    // 统一的平台执行 — 不再需要 #[cfg] 分支
-                    if let Some(ref platform) = st.platform {
-                        if !platform.is_automation_ready() {
+                #[cfg(not(target_os = "android"))]
+                {
+                    if let Some(plan) = st.pending_plan.take() {
+                        // 统一的平台执行 — 不再需要 #[cfg] 分支
+                        if let Some(ref platform) = st.platform {
+                            if !platform.is_automation_ready() {
+                                let Some(app) = app_weak.upgrade() else {
+                                    return;
+                                };
+                                app.set_show_confirmation(false);
+                                app.set_status_text("自动化引擎不可用".into());
+                                app.set_status_type("error".into());
+                            } else {
+                                audit::record("approved", "local", &plan, None);
+                                match platform.execute_plan(&plan, true) {
+                                    Ok(result) => {
+                                        audit::record("completed", "local", &plan, None);
+                                        let Some(app) = app_weak.upgrade() else {
+                                            return;
+                                        };
+                                        app.set_show_confirmation(false);
+                                        app.set_status_text(slint::format!(
+                                            "执行完成: {} 步",
+                                            result.actions_executed
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        audit::record(
+                                            "failed",
+                                            "local",
+                                            &plan,
+                                            Some(&e.to_string()),
+                                        );
+                                        let Some(app) = app_weak.upgrade() else {
+                                            return;
+                                        };
+                                        app.set_show_confirmation(false);
+                                        app.set_status_text(slint::format!("执行失败: {}", e));
+                                        app.set_status_type("error".into());
+                                    }
+                                }
+                            }
+                        } else {
                             let Some(app) = app_weak.upgrade() else {
                                 return;
                             };
                             app.set_show_confirmation(false);
-                            app.set_status_text("自动化引擎不可用".into());
+                            app.set_status_text("平台服务未初始化".into());
                             app.set_status_type("error".into());
-                        } else {
-                            match platform.execute_plan(&plan) {
-                                Ok(result) => {
-                                    let Some(app) = app_weak.upgrade() else {
-                                        return;
-                                    };
-                                    app.set_show_confirmation(false);
-                                    app.set_status_text(slint::format!(
-                                        "执行完成: {} 步",
-                                        result.actions_executed
-                                    ));
-                                }
-                                Err(e) => {
-                                    let Some(app) = app_weak.upgrade() else {
-                                        return;
-                                    };
-                                    app.set_show_confirmation(false);
-                                    app.set_status_text(slint::format!("执行失败: {}", e));
-                                    app.set_status_type("error".into());
-                                }
-                            }
                         }
-                    } else {
-                        let Some(app) = app_weak.upgrade() else {
-                            return;
-                        };
-                        app.set_show_confirmation(false);
-                        app.set_status_text("平台服务未初始化".into());
-                        app.set_status_type("error".into());
                     }
-                }
+                } // end #[cfg(not(target_os = "android"))]
             });
         });
     }
 
     // Cancel action
     {
+        let state = state.clone();
         let app_weak = app_weak.clone();
         app.on_cancel_action(move || {
+            let state = state.clone();
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
+            spawn_local_task(async move {
+                if let Some(plan) = state.lock().await.pending_plan.take() {
+                    audit::record("cancelled", "local", &plan, None);
+                }
+            });
             app.set_show_confirmation(false);
             app.set_confirmation_text("".into());
+            app.set_action_steps("".into());
+        });
+    }
+
+    // Pause or resume local microphone monitoring.
+    {
+        let state = state.clone();
+        let app_weak = app_weak.clone();
+        app.on_toggle_listening(move || {
+            let state = state.clone();
+            let app_weak = app_weak.clone();
+            spawn_local_task(async move {
+                let mut st = state.lock().await;
+                st.listening_enabled = !st.listening_enabled;
+                if !st.listening_enabled {
+                    st.recorder = None;
+                    st.vad.reset();
+                    st.vad_active = false;
+                }
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                app.set_listening_enabled(st.listening_enabled);
+                if st.listening_enabled {
+                    start_continuous_listening(&mut st, &app);
+                } else {
+                    app.set_status_text("监听已暂停".into());
+                    app.set_status_type("paused".into());
+                }
+            });
         });
     }
 
@@ -617,6 +696,8 @@ pub fn setup_app(app: &AppWindow) {
         });
     }
     {
+        #[cfg(target_os = "android")]
+        let state = state.clone();
         let app_weak = app_weak.clone();
         app.on_connect_remote(move || {
             #[cfg(target_os = "android")]
@@ -629,39 +710,41 @@ pub fn setup_app(app: &AppWindow) {
                 app.set_is_busy(true);
                 #[cfg(target_os = "android")]
                 {
-                let mut code = app.get_remote_code().to_string();
-                let address = app.get_remote_address().to_string();
-                let url = if address.trim().is_empty() {
-                    match remote_client::discover_first(code.clone()) {
-                        Some(info) => {
-                            app.set_remote_address(info.websocket_url().into());
-                            app.set_remote_pairing_info(info.uri().into());
-                            info.websocket_url()
+                    let mut code = app.get_remote_code().to_string();
+                    let address = app.get_remote_address().to_string();
+                    let url = if address.trim().is_empty() {
+                        match remote_client::discover_first(code.clone()) {
+                            Some(info) => {
+                                app.set_remote_address(info.websocket_url().into());
+                                app.set_remote_pairing_info(info.uri().into());
+                                info.websocket_url()
+                            }
+                            None => {
+                                app.set_remote_status(
+                                    "未自动发现桌面端，请手动输入地址或粘贴二维码链接".into(),
+                                );
+                                app.set_remote_connected(false);
+                                app.set_is_busy(false);
+                                return;
+                            }
                         }
-                        None => {
-                            app.set_remote_status("未自动发现桌面端，请手动输入地址或粘贴二维码链接".into());
-                            app.set_remote_connected(false);
-                            app.set_is_busy(false);
-                            return;
+                    } else if address.starts_with("ale-my-eyes://") {
+                        match ale_core::remote::PairingInfo::from_uri(&address) {
+                            Ok(info) => {
+                                code = info.code.clone();
+                                app.set_remote_code(code.clone().into());
+                                info.websocket_url()
+                            }
+                            Err(error) => {
+                                app.set_remote_status(slint::format!("配对链接无效: {}", error));
+                                app.set_remote_connected(false);
+                                app.set_is_busy(false);
+                                return;
+                            }
                         }
-                    }
-                } else if address.starts_with("ale-my-eyes://") {
-                    match ale_core::remote::PairingInfo::from_uri(&address) {
-                        Ok(info) => {
-                            code = info.code.clone();
-                            app.set_remote_code(code.clone().into());
-                            info.websocket_url()
-                        }
-                        Err(error) => {
-                            app.set_remote_status(slint::format!("配对链接无效: {}", error));
-                            app.set_remote_connected(false);
-                            app.set_is_busy(false);
-                            return;
-                        }
-                    }
-                } else {
-                    address
-                };
+                    } else {
+                        address
+                    };
 
                     let client = remote_client::RemoteClient::new(url.clone(), code);
                     match client.test().await {
@@ -687,6 +770,8 @@ pub fn setup_app(app: &AppWindow) {
         });
     }
     {
+        #[cfg(target_os = "android")]
+        let state = state.clone();
         let app_weak = app_weak.clone();
         app.on_disconnect_remote(move || {
             #[cfg(target_os = "android")]
@@ -749,6 +834,28 @@ pub fn setup_app(app: &AppWindow) {
                         }
                         // 重新创建平台服务。
                         let platform = platform::create_platform();
+                        let capabilities = platform.capabilities();
+                        app.set_capability_text(
+                            format!(
+                                "{}{}{}",
+                                if capabilities.local_microphone {
+                                    "麦克风 + "
+                                } else {
+                                    ""
+                                },
+                                if capabilities.image_capture {
+                                    "视觉"
+                                } else {
+                                    "无本机视觉"
+                                },
+                                if capabilities.automation {
+                                    " + 自动化"
+                                } else {
+                                    ""
+                                }
+                            )
+                            .into(),
+                        );
                         st.platform = Some(platform);
                         apply_config_to_app(&app, &new_config);
                         app.set_status_text("就绪".into());
@@ -815,6 +922,9 @@ fn spawn_local_task(future: impl Future<Output = ()> + 'static) {
 }
 
 fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
+    if !st.listening_enabled || st.recorder.is_some() {
+        return;
+    }
     match audio::Recorder::start() {
         Ok(recorder) => {
             st.recorder = Some(recorder);
@@ -824,6 +934,9 @@ fn start_continuous_listening(st: &mut AppState, app: &AppWindow) {
             st.vad_frame_count = 0;
             st.vad_active = true;
             app.set_vad_state("silent".into());
+            app.set_listening_enabled(true);
+            app.set_status_text("监听中".into());
+            app.set_status_type("listening".into());
         }
         Err(e) => {
             app.set_status_text(slint::format!("麦克风启动失败: {}", e));
@@ -842,11 +955,7 @@ fn apply_config_to_app(app: &AppWindow, config: &AppConfig) {
 }
 
 #[cfg(target_os = "android")]
-async fn handle_remote_command(
-    state: &Arc<Mutex<AppState>>,
-    app: &AppWindow,
-    input: CommandInput,
-) {
+async fn handle_remote_command(state: &Arc<Mutex<AppState>>, app: &AppWindow, input: CommandInput) {
     let client = { state.lock().await.remote_client.clone() };
     let Some(client) = client else {
         app.set_ai_response("请先在设置中连接桌面端".into());
